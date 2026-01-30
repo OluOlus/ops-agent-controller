@@ -1,0 +1,46 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'OpsAgent Controller - Minimal Test'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: sandbox
+
+Resources:
+  # Simple Lambda function
+  TestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'opsagent-test-${Environment}'
+      CodeUri: ../src/
+      Handler: main.lambda_handler
+      Runtime: python3.11
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          EXECUTION_MODE: LOCAL_MOCK
+      Events:
+        HealthCheck:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TestApi
+            Path: /health
+            Method: GET
+
+  # Simple API Gateway
+  TestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Environment
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Api-Key'"
+        AllowOrigin: "'*'"
+
+Outputs:
+  ApiUrl:
+    Description: 'API Gateway endpoint URL'
+    Value: !Sub 'https://${TestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'

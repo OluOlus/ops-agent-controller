@@ -1,0 +1,72 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "REPLACE_WITH_YOUR_BOT_APP_ID",
+  "packageName": "com.opsagent.controller",
+  "developer": {
+    "name": "OpsAgent Team",
+    "websiteUrl": "https://github.com/opsagent/controller",
+    "privacyUrl": "https://github.com/opsagent/controller/privacy",
+    "termsOfUseUrl": "https://github.com/opsagent/controller/terms"
+  },
+  "name": {
+    "short": "OpsAgent",
+    "full": "OpsAgent Controller - AWS Operations Assistant"
+  },
+  "description": {
+    "short": "Conversational AWS operations assistant for incident response",
+    "full": "OpsAgent Controller helps platform teams diagnose AWS incidents and perform controlled remediation actions through chat interfaces with approval gates and comprehensive audit logging. Features include CloudWatch metrics analysis, EC2 instance management, and secure approval workflows."
+  },
+  "icons": {
+    "outline": "outline.png",
+    "color": "color.png"
+  },
+  "accentColor": "#FF6B35",
+  "bots": [
+    {
+      "botId": "REPLACE_WITH_YOUR_BOT_APP_ID",
+      "scopes": ["personal", "team", "groupchat"],
+      "commandLists": [
+        {
+          "scopes": ["personal", "team", "groupchat"],
+          "commands": [
+            {
+              "title": "health",
+              "description": "Check OpsAgent system health and status"
+            },
+            {
+              "title": "describe instance i-1234567890abcdef0",
+              "description": "Get detailed information about an EC2 instance"
+            },
+            {
+              "title": "cpu metrics for i-1234567890abcdef0",
+              "description": "Get CPU utilization metrics for an EC2 instance"
+            },
+            {
+              "title": "cloudwatch metrics AWS/EC2 CPUUtilization",
+              "description": "Get CloudWatch metrics for a specific namespace and metric"
+            },
+            {
+              "title": "reboot instance i-1234567890abcdef0",
+              "description": "Request to reboot an EC2 instance (requires approval)"
+            },
+            {
+              "title": "help",
+              "description": "Show available commands and usage examples"
+            }
+          ]
+        }
+      ],
+      "isNotificationOnly": false
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": [
+    "xt3qtho8l6.execute-api.eu-west-2.amazonaws.com"
+  ],
+  "webApplicationInfo": {
+    "id": "REPLACE_WITH_YOUR_BOT_APP_ID",
+    "resource": "https://RscBasedStoreApp"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "Variables": {
+    "API_KEY_PARAMETER": "/opsagent/api-key",
+    "AUDIT_TABLE_NAME": "opsagent-audit-sandbox",
+    "CLOUDWATCH_LOG_GROUP": "/aws/lambda/opsagent-audit-sandbox",
+    "EXECUTION_MODE": "SANDBOX_LIVE",
+    "KMS_KEY_ID": "3223b616-8c70-4f0a-b9d4-9976be303472",
+    "ENVIRONMENT": "sandbox",
+    "LLM_PROVIDER": "bedrock",
+    "BEDROCK_MODEL_ID": "anthropic.claude-3-sonnet-20240229-v1:0",
+    "AUDIT_LOG_GROUP": "/aws/lambda/opsagent-audit-sandbox",
+    "TEAMS_BOT_APP_ID": "7245659a-25f0-455c-9a75-06451e81fc3e",
+    "AZURE_TENANT_ID": "78952f68-6959-4fc9-a579-af36c10eee5c",
+    "AWS_ACCOUNT_ID": "612176863084"
+  }
+}

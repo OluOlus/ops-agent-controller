@@ -1,0 +1,43 @@
+# SAM configuration file for OpsAgent Controller
+
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "opsagent-controller"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+resolve_s3 = true
+s3_prefix = "opsagent-controller"
+region = "us-east-1"
+image_repositories = []
+
+[sandbox]
+[sandbox.deploy.parameters]
+stack_name = "opsagent-controller-sandbox"
+parameter_overrides = [
+    "Environment=sandbox",
+    "ExecutionMode=DRY_RUN"
+]
+
+[staging]
+[staging.deploy.parameters]
+stack_name = "opsagent-controller-staging"
+parameter_overrides = [
+    "Environment=staging", 
+    "ExecutionMode=SANDBOX_LIVE"
+]
+
+[production]
+[production.deploy.parameters]
+stack_name = "opsagent-controller-production"
+parameter_overrides = [
+    "Environment=production",
+    "ExecutionMode=SANDBOX_LIVE"
+]

@@ -1,0 +1,12 @@
+{
+  "httpMethod": "GET",
+  "path": "/health",
+  "headers": {},
+  "queryStringParameters": null,
+  "body": null,
+  "requestContext": {
+    "identity": {
+      "sourceIp": "127.0.0.1"
+    }
+  }
+}

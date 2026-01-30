@@ -1,0 +1,53 @@
+{
+  "start_time": "2026-01-29T14:18:40.373636",
+  "test_suites": {
+    "infrastructure_smoke": {
+      "status": "passed",
+      "return_code": 0,
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "stdout": "============================= test session starts ==============================\nplatform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0 -- /Library/Developer/CommandLineTools/usr/bin/python3\ncachedir: .pytest_cache\nhypothesis profile 'default'\nrootdir: /Users/Olu/vsc/ops-agent-controller\nconfigfile: pytest.ini\nplugins: mock-3.15.1, hypothesis-6.141.1, cov-7.0.0\ncollecting ... collected 8 items\n\ntest_smoke_tests.py::TestInfrastructureSmokeTests::test_health_endpoint_accessibility PASSED [ 12%]\ntest_smoke_tests.py::TestInfrastructureSmokeTests::test_health_endpoint_execution_mode_reporting PASSED [ 25%]\ntest_smoke_tests.py::TestInfrastructureSmokeTests::test_health_endpoint_llm_provider_status PASSED [ 37%]\ntest_smoke_tests.py::TestInfrastructureSmokeTests::test_health_endpoint_aws_tool_access_status PASSED [ 50%]\ntest_smoke_tests.py::TestInfrastructureSmokeTests::test_chat_endpoint_accessibility PASSED [ 62%]\ntest_smoke_tests.py::TestInfrastructureSmokeTests::test_cors_headers_present PASSED [ 75%]\ntest_smoke_tests.py::TestInfrastructureSmokeTests::test_rate_limiting_functionality PASSED [ 87%]\ntest_smoke_tests.py::TestInfrastructureSmokeTests::test_component_initialization_status PASSED [100%]\n\n=============================== warnings summary ===============================\ntests/test_smoke_tests.py::TestInfrastructureSmokeTests::test_health_endpoint_accessibility\ntests/test_smoke_tests.py::TestInfrastructureSmokeTests::test_health_endpoint_execution_mode_reporting\ntests/test_smoke_tests.py::TestInfrastructureSmokeTests::test_health_endpoint_llm_provider_status\ntests/test_smoke_tests.py::TestInfrastructureSmokeTests::test_component_initialization_status\n  /Users/Olu/Library/Python/3.9/lib/python/site-packages/boto3/compat.py:89: PythonDeprecationWarning: Boto3 will no longer support Python 3.9 starting April 29, 2026. To continue receiving service updates, bug fixes, and security updates please upgrade to Python 3.10 or later. More information can be found here: https://aws.amazon.com/blogs/developer/python-support-policy-updates-for-aws-sdks-and-tools/\n    warnings.warn(warning, PythonDeprecationWarning)\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n======================== 8 passed, 4 warnings in 0.63s =========================\n",
+      "stderr": ""
+    },
+    "diagnosis_tools": {
+      "status": "passed",
+      "return_code": 0,
+      "total": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "stdout": "============================= test session starts ==============================\nplatform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0 -- /Library/Developer/CommandLineTools/usr/bin/python3\ncachedir: .pytest_cache\nhypothesis profile 'default'\nrootdir: /Users/Olu/vsc/ops-agent-controller\nconfigfile: pytest.ini\nplugins: mock-3.15.1, hypothesis-6.141.1, cov-7.0.0\ncollecting ... collected 5 items\n\ntest_smoke_tests.py::TestDiagnosisToolValidation::test_cloudwatch_metrics_tool_functionality PASSED [ 20%]\ntest_smoke_tests.py::TestDiagnosisToolValidation::test_ec2_describe_tool_functionality PASSED [ 40%]\ntest_smoke_tests.py::TestDiagnosisToolValidation::test_diagnosis_tools_error_handling PASSED [ 60%]\ntest_smoke_tests.py::TestDiagnosisToolValidation::test_diagnosis_tools_integration_with_chat PASSED [ 80%]\ntest_smoke_tests.py::TestDiagnosisToolValidation::test_diagnosis_tools_read_only_guarantee PASSED [100%]\n\n============================== 5 passed in 0.28s ===============================\n",
+      "stderr": ""
+    },
+    "approval_gate": {
+      "status": "passed",
+      "return_code": 0,
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "stdout": "============================= test session starts ==============================\nplatform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0 -- /Library/Developer/CommandLineTools/usr/bin/python3\ncachedir: .pytest_cache\nhypothesis profile 'default'\nrootdir: /Users/Olu/vsc/ops-agent-controller\nconfigfile: pytest.ini\nplugins: mock-3.15.1, hypothesis-6.141.1, cov-7.0.0\ncollecting ... collected 7 items\n\ntest_smoke_tests.py::TestApprovalGateAndRemediationTesting::test_approval_gate_creation_and_validation PASSED [ 14%]\ntest_smoke_tests.py::TestApprovalGateAndRemediationTesting::test_approval_gate_token_expiry PASSED [ 28%]\ntest_smoke_tests.py::TestApprovalGateAndRemediationTesting::test_approval_gate_token_consumption PASSED [ 42%]\ntest_smoke_tests.py::TestApprovalGateAndRemediationTesting::test_remediation_tool_dry_run_mode PASSED [ 57%]\ntest_smoke_tests.py::TestApprovalGateAndRemediationTesting::test_remediation_tool_tag_validation PASSED [ 71%]\ntest_smoke_tests.py::TestApprovalGateAndRemediationTesting::test_end_to_end_approval_workflow PASSED [ 85%]\ntest_smoke_tests.py::TestApprovalGateAndRemediationTesting::test_approval_denial_workflow PASSED [100%]\n\n=============================== warnings summary ===============================\ntests/test_smoke_tests.py::TestApprovalGateAndRemediationTesting::test_remediation_tool_tag_validation\n  /Users/Olu/Library/Python/3.9/lib/python/site-packages/boto3/compat.py:89: PythonDeprecationWarning: Boto3 will no longer support Python 3.9 starting April 29, 2026. To continue receiving service updates, bug fixes, and security updates please upgrade to Python 3.10 or later. More information can be found here: https://aws.amazon.com/blogs/developer/python-support-policy-updates-for-aws-sdks-and-tools/\n    warnings.warn(warning, PythonDeprecationWarning)\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n========================= 7 passed, 1 warning in 1.52s =========================\n",
+      "stderr": ""
+    },
+    "audit_logging": {
+      "status": "passed",
+      "return_code": 0,
+      "total": 8,
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "stdout": "============================= test session starts ==============================\nplatform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0 -- /Library/Developer/CommandLineTools/usr/bin/python3\ncachedir: .pytest_cache\nhypothesis profile 'default'\nrootdir: /Users/Olu/vsc/ops-agent-controller\nconfigfile: pytest.ini\nplugins: mock-3.15.1, hypothesis-6.141.1, cov-7.0.0\ncollecting ... collected 8 items\n\ntest_smoke_tests.py::TestAuditLoggingVerification::test_audit_logger_initialization PASSED [ 12%]\ntest_smoke_tests.py::TestAuditLoggingVerification::test_audit_logging_request_received PASSED [ 25%]\ntest_smoke_tests.py::TestAuditLoggingVerification::test_audit_logging_tool_execution PASSED [ 37%]\ntest_smoke_tests.py::TestAuditLoggingVerification::test_audit_logging_approval_workflow PASSED [ 50%]\ntest_smoke_tests.py::TestAuditLoggingVerification::test_audit_logging_error_handling PASSED [ 62%]\ntest_smoke_tests.py::TestAuditLoggingVerification::test_audit_logging_secret_sanitization PASSED [ 75%]\ntest_smoke_tests.py::TestAuditLoggingVerification::test_audit_logging_correlation_id_consistency PASSED [ 87%]\ntest_smoke_tests.py::TestAuditLoggingVerification::test_audit_logging_integration_with_chat PASSED [100%]\n\n============================== 8 passed in 0.25s ===============================\n",
+      "stderr": ""
+    }
+  },
+  "summary": {
+    "total_tests": 13,
+    "passed_tests": 13,
+    "failed_tests": 0,
+    "skipped_tests": 0
+  },
+  "end_time": "2026-01-29T14:18:44.527351",
+  "total_duration_seconds": 4.153715
+}

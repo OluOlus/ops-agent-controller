@@ -1,0 +1,734 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'OpsAgent Controller - Serverless conversational Tier-1 Ops assistant'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: sandbox
+    AllowedValues:
+      - sandbox
+      - staging
+      - production
+    Description: Deployment environment
+  
+  ExecutionMode:
+    Type: String
+    Default: LOCAL_MOCK
+    AllowedValues:
+      - LOCAL_MOCK
+      - DRY_RUN
+      - SANDBOX_LIVE
+    Description: OpsAgent execution mode
+  
+  LLMProvider:
+    Type: String
+    Default: bedrock
+    AllowedValues:
+      - bedrock
+      - openai
+      - azure_openai
+    Description: LLM provider to use
+  
+  BedrockModelId:
+    Type: String
+    Default: anthropic.claude-3-sonnet-20240229-v1:0
+    Description: Bedrock model ID for LLM provider
+  
+  ApiKeyParameterName:
+    Type: String
+    Default: /opsagent/api-key
+    Description: SSM Parameter name for API key (optional)
+  
+  EnableDynamoDBEncryption:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable DynamoDB encryption at rest
+  
+  CreateTestResources:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Create test EC2 instance for remediation testing
+  
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Description: Latest Amazon Linux 2 AMI ID
+
+Conditions:
+  EnableEncryption: !Equals [!Ref EnableDynamoDBEncryption, 'true']
+  CreateTestResources: !Equals [!Ref CreateTestResources, 'true']
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.11
+    Environment:
+      Variables:
+        EXECUTION_MODE: !Ref ExecutionMode
+        ENVIRONMENT: !Ref Environment
+        LLM_PROVIDER: !Ref LLMProvider
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+    Tags:
+      Project: OpsAgent
+      Environment: !Ref Environment
+      Owner: Platform-Team
+
+Resources:
+  # KMS Key for encryption
+  OpsAgentKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: 'KMS Key for OpsAgent Controller encryption'
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow CloudWatch Logs
+            Effect: Allow
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.amazonaws.com'
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+          - Sid: Allow Lambda Function
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt OpsAgentExecutionRole.Arn
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+      Tags:
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+
+  OpsAgentKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/opsagent-${Environment}'
+      TargetKeyId: !Ref OpsAgentKMSKey
+
+  # API Gateway
+  OpsAgentApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Environment
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+        MaxAge: "'600'"
+      Auth:
+        DefaultAuthorizer: AWS_IAM
+        InvokeRole: NONE
+      EndpointConfiguration:
+        Type: REGIONAL
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          DataTraceEnabled: true
+          MetricsEnabled: true
+          ThrottlingRateLimit: 100
+          ThrottlingBurstLimit: 200
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiGatewayLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength"}'
+      Tags:
+        Project: OpsAgent
+        Environment: !Ref Environment
+        Owner: Platform-Team
+
+  # CloudWatch Log Group for API Gateway
+  ApiGatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/opsagent-${Environment}'
+      RetentionInDays: 30
+      KmsKeyId: !GetAtt OpsAgentKMSKey.Arn
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+
+  # Lambda Function
+  OpsAgentFunction:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - OpsAgentAuditLoggingPolicy
+      - OpsAgentDiagnosisToolsPolicy
+      - OpsAgentRemediationToolsPolicy
+      - OpsAgentLLMProviderPolicy
+      - OpsAgentSystemPolicy
+    Properties:
+      FunctionName: !Sub 'opsagent-controller-${Environment}'
+      CodeUri: ../src/
+      Handler: main.lambda_handler
+      Description: 'OpsAgent Controller - Main Lambda function'
+      Role: !GetAtt OpsAgentExecutionRole.Arn
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt DeadLetterQueue.Arn
+      Events:
+        HealthCheck:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpsAgentApi
+            Path: /health
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        ChatMessage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpsAgentApi
+            Path: /chat
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        AuthCallback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpsAgentApi
+            Path: /auth/callback
+            Method: GET
+            Auth:
+              Authorizer: NONE
+      Environment:
+        Variables:
+          AUDIT_LOG_GROUP: !Ref AuditLogGroup
+          CLOUDWATCH_LOG_GROUP: !Ref AuditLogGroup
+          AUDIT_TABLE_NAME: !Ref AuditTable
+          KMS_KEY_ID: !Ref OpsAgentKMSKey
+          API_KEY_PARAMETER: !Ref ApiKeyParameterName
+          TEAMS_BOT_APP_ID: "7245659a-25f0-455c-9a75-06451e81fc3e"
+          AZURE_TENANT_ID: "78952f68-6959-4fc9-a579-af36c10eee5c"
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          TEAMS_BOT_APP_ID: "7245659a-25f0-455c-9a75-06451e81fc3e"
+          AZURE_TENANT_ID: "78952f68-6959-4fc9-a579-af36c10eee5c"
+          AWS_ACCOUNT_ID: !Ref "AWS::AccountId"
+      Tags:
+        Project: OpsAgent
+        Environment: !Ref Environment
+        Owner: Platform-Team
+
+  # Dead Letter Queue for failed Lambda invocations
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'opsagent-dlq-${Environment}'
+      MessageRetentionPeriod: 1209600  # 14 days
+      KmsMasterKeyId: !Ref OpsAgentKMSKey
+      Tags:
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+
+  # IAM Role for Lambda execution with least privilege permissions
+  OpsAgentExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+
+  # Separate IAM policies for better organization and least privilege
+  OpsAgentAuditLoggingPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: OpsAgentAuditLoggingPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # CloudWatch Logs permissions for audit logging
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+            Resource: 
+              - !GetAtt AuditLogGroup.Arn
+              - !GetAtt ApiGatewayLogGroup.Arn
+          
+          # DynamoDB permissions for audit storage
+          - Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:GetItem
+              - dynamodb:Query
+              - dynamodb:UpdateItem
+            Resource: !GetAtt AuditTable.Arn
+          
+          # KMS permissions for encryption
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !GetAtt OpsAgentKMSKey.Arn
+          
+          # SQS permissions for dead letter queue
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt DeadLetterQueue.Arn
+      Roles:
+        - !Ref OpsAgentExecutionRole
+
+  OpsAgentDiagnosisToolsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: OpsAgentDiagnosisToolsPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # CloudWatch read-only permissions for diagnosis tools
+          - Effect: Allow
+            Action:
+              - cloudwatch:GetMetricStatistics
+              - cloudwatch:GetMetricData
+              - cloudwatch:ListMetrics
+              - cloudwatch:DescribeAlarms
+              - cloudwatch:GetMetricWidgetImage
+            Resource: '*'
+          
+          # EC2 read-only permissions for diagnosis tools
+          - Effect: Allow
+            Action:
+              - ec2:DescribeInstances
+              - ec2:DescribeInstanceStatus
+              - ec2:DescribeTags
+              - ec2:DescribeImages
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeVpcs
+              - ec2:DescribeSubnets
+            Resource: '*'
+          
+          # ECS/ALB read-only permissions for diagnosis tools
+          - Effect: Allow
+            Action:
+              - ecs:DescribeServices
+              - ecs:DescribeTasks
+              - ecs:DescribeClusters
+              - ecs:DescribeTaskDefinition
+              - ecs:ListTasks
+              - ecs:ListServices
+              - elasticloadbalancing:DescribeLoadBalancers
+              - elasticloadbalancing:DescribeTargetGroups
+              - elasticloadbalancing:DescribeTargetHealth
+              - elasticloadbalancing:DescribeListeners
+              - elasticloadbalancing:DescribeRules
+            Resource: '*'
+          
+          # Additional AWS services for comprehensive diagnosis
+          - Effect: Allow
+            Action:
+              - application-autoscaling:DescribeScalingPolicies
+              - autoscaling:DescribeAutoScalingGroups
+              - autoscaling:DescribeScalingActivities
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+              - logs:FilterLogEvents
+            Resource: '*'
+      Roles:
+        - !Ref OpsAgentExecutionRole
+
+  OpsAgentRemediationToolsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: OpsAgentRemediationToolsPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # EC2 remediation permissions (restricted to tagged resources)
+          - Effect: Allow
+            Action:
+              - ec2:RebootInstances
+              - ec2:StartInstances
+              - ec2:StopInstances
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'ec2:ResourceTag/OpsAgentManaged': 'true'
+          
+          # Additional remediation actions (also restricted to tagged resources)
+          - Effect: Allow
+            Action:
+              - ecs:UpdateService
+              - ecs:RestartTask
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'aws:ResourceTag/OpsAgentManaged': 'true'
+          
+          # Auto Scaling remediation (restricted to tagged resources)
+          - Effect: Allow
+            Action:
+              - autoscaling:SetDesiredCapacity
+              - autoscaling:UpdateAutoScalingGroup
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'aws:ResourceTag/OpsAgentManaged': 'true'
+      Roles:
+        - !Ref OpsAgentExecutionRole
+
+  OpsAgentLLMProviderPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: OpsAgentLLMProviderPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Bedrock permissions for LLM provider
+          - Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+            Resource: 
+              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0'
+              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0'
+              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-instant-v1'
+          
+          # SSM Parameter Store permissions for API keys and configuration
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:GetParametersByPath
+            Resource: 
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/opsagent/*'
+          
+          # Secrets Manager permissions for sensitive configuration
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: 
+              - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:opsagent/*'
+      Roles:
+        - !Ref OpsAgentExecutionRole
+
+  OpsAgentSystemPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: OpsAgentSystemPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # STS permissions for identity validation
+          - Effect: Allow
+            Action:
+              - sts:GetCallerIdentity
+            Resource: '*'
+          
+          # X-Ray permissions for tracing
+          - Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+            Resource: '*'
+      Roles:
+        - !Ref OpsAgentExecutionRole
+
+  # CloudWatch Log Group for audit logging
+  AuditLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/opsagent-audit-${Environment}'
+      RetentionInDays: 90
+      KmsKeyId: !GetAtt OpsAgentKMSKey.Arn
+      Tags:
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+
+  # DynamoDB table for audit storage with encryption
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'opsagent-audit-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: correlationId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: correlationId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: UserIdIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: !Ref EnableDynamoDBEncryption
+        SSEType: !If
+          - EnableEncryption
+          - KMS
+          - !Ref AWS::NoValue
+        KMSMasterKeyId: !If
+          - EnableEncryption
+          - !Ref OpsAgentKMSKey
+          - !Ref AWS::NoValue
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+
+  # SSM Parameter for API Key (optional)
+  ApiKeyParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Ref ApiKeyParameterName
+      Type: String
+      Value: !Sub 'changeme-${AWS::AccountId}-${Environment}'
+      Description: 'API key for OpsAgent Controller authentication'
+      Tags:
+        Project: OpsAgent
+        Environment: !Ref Environment
+        Owner: Platform-Team
+
+  # Test EC2 Instance for remediation testing (tagged for OpsAgent management)
+  TestInstance:
+    Type: AWS::EC2::Instance
+    Condition: CreateTestResources
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t3.micro
+      IamInstanceProfile: !Ref TestInstanceProfile
+      SecurityGroupIds:
+        - !Ref TestSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y amazon-cloudwatch-agent
+          # Configure CloudWatch agent for metrics
+          cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOF'
+          {
+            "metrics": {
+              "namespace": "OpsAgent/Test",
+              "metrics_collected": {
+                "cpu": {
+                  "measurement": ["cpu_usage_idle", "cpu_usage_iowait", "cpu_usage_user", "cpu_usage_system"],
+                  "metrics_collection_interval": 60
+                },
+                "disk": {
+                  "measurement": ["used_percent"],
+                  "metrics_collection_interval": 60,
+                  "resources": ["*"]
+                },
+                "mem": {
+                  "measurement": ["mem_used_percent"],
+                  "metrics_collection_interval": 60
+                }
+              }
+            }
+          }
+          EOF
+          /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
+      Tags:
+        - Key: Name
+          Value: !Sub 'opsagent-test-instance-${Environment}'
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+        - Key: OpsAgentManaged
+          Value: 'true'
+
+  # Security Group for test instance
+  TestSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateTestResources
+    Properties:
+      GroupDescription: Security group for OpsAgent test instance
+      Tags:
+        - Key: Name
+          Value: !Sub 'opsagent-test-sg-${Environment}'
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+
+  # IAM Role for test instance
+  TestInstanceRole:
+    Type: AWS::IAM::Role
+    Condition: CreateTestResources
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Tags:
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+
+  TestInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: CreateTestResources
+    Properties:
+      Roles:
+        - !Ref TestInstanceRole
+
+Outputs:
+  ApiGatewayUrl:
+    Description: 'API Gateway endpoint URL'
+    Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrl'
+
+  HealthEndpointUrl:
+    Description: 'Health check endpoint'
+    Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health'
+    Export:
+      Name: !Sub '${AWS::StackName}-HealthUrl'
+
+  ChatEndpointUrl:
+    Description: 'Chat endpoint for sending messages'
+    Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/chat'
+    Export:
+      Name: !Sub '${AWS::StackName}-ChatUrl'
+
+  LambdaFunctionArn:
+    Description: 'Lambda function ARN'
+    Value: !GetAtt OpsAgentFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaArn'
+
+  LambdaFunctionName:
+    Description: 'Lambda function name'
+    Value: !Ref OpsAgentFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaName'
+
+  AuditLogGroupName:
+    Description: 'CloudWatch Log Group for audit logs'
+    Value: !Ref AuditLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-AuditLogGroup'
+
+  AuditTableName:
+    Description: 'DynamoDB table for audit storage'
+    Value: !Ref AuditTable
+    Export:
+      Name: !Sub '${AWS::StackName}-AuditTable'
+
+  KMSKeyId:
+    Description: 'KMS Key ID for encryption'
+    Value: !Ref OpsAgentKMSKey
+    Export:
+      Name: !Sub '${AWS::StackName}-KMSKey'
+
+  KMSKeyAlias:
+    Description: 'KMS Key Alias'
+    Value: !Ref OpsAgentKMSKeyAlias
+    Export:
+      Name: !Sub '${AWS::StackName}-KMSKeyAlias'
+
+  ExecutionRoleArn:
+    Description: 'Lambda execution role ARN'
+    Value: !GetAtt OpsAgentExecutionRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ExecutionRole'
+
+  ApiKeyParameterName:
+    Description: 'SSM Parameter name for API key'
+    Value: !Ref ApiKeyParameter
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiKeyParameter'
+
+  TestInstanceId:
+    Condition: CreateTestResources
+    Description: 'Test EC2 instance ID for remediation testing'
+    Value: !Ref TestInstance
+    Export:
+      Name: !Sub '${AWS::StackName}-TestInstance'
+
+  DeploymentInstructions:
+    Description: 'Next steps after deployment'
+    Value: !Sub |
+      1. Update API key: aws ssm put-parameter --name "${ApiKeyParameterName}" --value "your-secure-api-key" --type SecureString --overwrite
+      2. Test health endpoint: curl -H "X-API-Key: your-api-key" https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health
+      3. Test chat endpoint: curl -X POST -H "Content-Type: application/json" -H "X-API-Key: your-api-key" -d '{"userId":"test-user","messageText":"Check CPU for test instance","channel":"web"}' https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/chat
+      4. For Teams integration, configure bot endpoint to: https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/chat
+      5. Execution mode: ${ExecutionMode} (change via parameter for different modes)
