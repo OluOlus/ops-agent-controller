@@ -11,13 +11,13 @@ import hashlib
 import hmac
 import base64
 
-from .models import InternalMessage, ChannelType, ExecutionMode, validate_message_text, validate_user_id
-from .channel_adapters import WebChannelAdapter, create_channel_adapter, ChannelAdapter
-from .llm_provider import create_llm_provider, LLMProviderError
-from .tool_execution_engine import ToolExecutionEngine, ExecutionContext
-from .approval_gate import ApprovalGate
-from .audit_logger import AuditLogger
-from .teams_auth_handler import TeamsAuthHandler
+from models import InternalMessage, ChannelType, ExecutionMode, validate_message_text, validate_user_id
+from channel_adapters import WebChannelAdapter, create_channel_adapter, ChannelAdapter
+from llm_provider import create_llm_provider, LLMProviderError
+from tool_execution_engine import ToolExecutionEngine, ExecutionContext
+from approval_gate import ApprovalGate
+from audit_logger import AuditLogger
+from teams_auth_handler import TeamsAuthHandler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -96,7 +96,7 @@ def get_or_create_components(execution_mode: ExecutionMode):
         _audit_logger.set_execution_mode(execution_mode)
         logger.info(f"Updated audit logger to {execution_mode.value} mode")
     
-    return _llm_provider, _tool_execution_engine, _approval_gate, _audit_logger
+    return _llm_provider, _tool_execution_engine, _approval_gate, _audit_logger, _teams_auth_handler
 
 
 def cleanup_rate_limit_store():
@@ -1176,4 +1176,4 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
     """
     Main Lambda entry point - routes to appropriate handler
     """
-    return request_handler(event, context)
+    return health_handler(event, context)
