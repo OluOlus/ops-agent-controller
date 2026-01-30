@@ -9,7 +9,15 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 
-from models import InternalMessage, ChannelType, ExecutionMode, ApprovalRequest, validate_message_text, validate_user_id, validate_channel_conversation_id
+from .models import (
+    InternalMessage,
+    ChannelType,
+    ExecutionMode,
+    ApprovalRequest,
+    validate_message_text,
+    validate_user_id,
+    validate_channel_conversation_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -605,7 +613,7 @@ class WebChannelAdapter(ChannelAdapter):
             
             # Determine execution mode from environment or request
             execution_mode_str = (
-                body.get("executionMode") or 
+                body.get("executionMode") or
                 raw_request.get("executionMode", "LOCAL_MOCK")
             )
             
@@ -658,6 +666,11 @@ class WebChannelAdapter(ChannelAdapter):
         Requirements: 1.2, 1.5
         """
         # Web channel uses simple JSON format
+        if additional_data and additional_data.get("user_id"):
+            user_id = additional_data["user_id"]
+            if user_id not in message:
+                message = f"{message}\n\nUser: {user_id}"
+
         channel_data = {
             "message": message,
             "format": "text",
@@ -949,7 +962,7 @@ def create_channel_adapter(channel_type: ChannelType) -> ChannelAdapter:
     if channel_type == ChannelType.WEB:
         return WebChannelAdapter()
     elif channel_type == ChannelType.TEAMS:
-        return TeamsChannelAdapter()
+        raise NotImplementedError("Teams channel adapter not yet implemented")
     elif channel_type == ChannelType.SLACK:
         # TODO: Implement SlackChannelAdapter (future enhancement)
         raise NotImplementedError("Slack channel adapter not yet implemented")
