@@ -14,7 +14,7 @@ from dataclasses import dataclass, asdict
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
-from models import InternalMessage, ToolCall, ToolResult, ApprovalRequest, ExecutionMode
+from .models import InternalMessage, ToolCall, ToolResult, ApprovalRequest, ExecutionMode
 
 
 logger = logging.getLogger(__name__)
@@ -336,7 +336,7 @@ class AuditLogger:
     def _write_to_dynamodb(self, event: AuditEvent) -> None:
         """Write audit event to DynamoDB"""
         item = {
-            'correlationId': {'S': event.correlation_id},
+            'correlation_id': {'S': event.correlation_id},
             'timestamp': {'S': event.timestamp.isoformat() + 'Z'},
             'event_type': {'S': event.event_type.value},
             'user_id': {'S': event.user_id},

@@ -160,7 +160,8 @@ cat > teams-app-manifest.json << EOF
   ],
   "permissions": ["identity", "messageTeamMembers"],
   "validDomains": [
-    "xt3qtho8l6.execute-api.eu-west-2.amazonaws.com"
+    "xt3qtho8l6.execute-api.eu-west-2.amazonaws.com",
+    "login.microsoftonline.com"
   ],
   "webApplicationInfo": {
     "id": "$BOT_APP_ID",

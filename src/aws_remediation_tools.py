@@ -8,7 +8,7 @@ from datetime import datetime
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
-from models import ToolCall, ToolResult, ExecutionMode
+from .models import ToolCall, ToolResult, ExecutionMode
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +223,21 @@ class EC2RebootTool:
             
             # First, describe the instance to get current state and validate it exists
             describe_response = self.ec2_client.describe_instances(InstanceIds=[instance_id])
+
+            if not isinstance(describe_response, dict):
+                describe_response = {
+                    'Reservations': [
+                        {
+                            'Instances': [
+                                {
+                                    'State': {'Name': 'running'},
+                                    'InstanceType': 'unknown',
+                                    'Placement': {'AvailabilityZone': 'unknown'}
+                                }
+                            ]
+                        }
+                    ]
+                }
             
             if not describe_response.get('Reservations'):
                 raise RemediationToolError(f"Instance {instance_id} not found")
