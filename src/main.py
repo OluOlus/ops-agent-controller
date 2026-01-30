@@ -17,7 +17,7 @@ from llm_provider import create_llm_provider, LLMProviderError
 from tool_execution_engine import ToolExecutionEngine, ExecutionContext
 from approval_gate import ApprovalGate
 from audit_logger import AuditLogger
-# from teams_auth_handler import TeamsAuthHandler
+from teams_auth_handler import TeamsAuthHandler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -51,9 +51,9 @@ def get_or_create_components(execution_mode: ExecutionMode):
     global _llm_provider, _tool_execution_engine, _approval_gate, _audit_logger, _teams_auth_handler
     
     # Initialize Teams auth handler if not exists
-    # if _teams_auth_handler is None:
-    #     _teams_auth_handler = TeamsAuthHandler()
-    #     logger.info("Initialized Teams auth handler")
+    if _teams_auth_handler is None:
+        _teams_auth_handler = TeamsAuthHandler()
+        logger.info("Initialized Teams auth handler")
     
     # Initialize LLM provider if not exists or mode changed
     if _llm_provider is None:
@@ -93,7 +93,7 @@ def get_or_create_components(execution_mode: ExecutionMode):
         _audit_logger.set_execution_mode(execution_mode)
         logger.info(f"Updated audit logger to {execution_mode.value} mode")
     
-    return _llm_provider, _tool_execution_engine, _approval_gate, _audit_logger, None  # _teams_auth_handler
+    return _llm_provider, _tool_execution_engine, _approval_gate, _audit_logger, _teams_auth_handler
 
 
 def cleanup_rate_limit_store():
