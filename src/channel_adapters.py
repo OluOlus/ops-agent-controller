@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 
-from .models import (
+from models import (
     InternalMessage,
     ChannelType,
     ExecutionMode,
@@ -962,7 +962,7 @@ def create_channel_adapter(channel_type: ChannelType) -> ChannelAdapter:
     if channel_type == ChannelType.WEB:
         return WebChannelAdapter()
     elif channel_type == ChannelType.TEAMS:
-        raise NotImplementedError("Teams channel adapter not yet implemented")
+        return TeamsChannelAdapter()
     elif channel_type == ChannelType.SLACK:
         # TODO: Implement SlackChannelAdapter (future enhancement)
         raise NotImplementedError("Slack channel adapter not yet implemented")

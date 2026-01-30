@@ -61,9 +61,25 @@ Parameters:
     Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
     Description: Latest Amazon Linux 2 AMI ID
 
+  TeamsBotAppId:
+    Type: String
+    Default: ''
+    Description: Microsoft Teams Bot Application ID from Azure Portal
+
+  AzureTenantId:
+    Type: String
+    Default: ''
+    Description: Azure AD Tenant ID for authentication
+
+  AwsAccountId:
+    Type: String
+    Default: ''
+    Description: AWS Account ID for cross-account operations (optional, defaults to current account)
+
 Conditions:
   EnableEncryption: !Equals [!Ref EnableDynamoDBEncryption, 'true']
   CreateTestResources: !Equals [!Ref CreateTestResources, 'true']
+  HasCustomAwsAccountId: !Not [!Equals [!Ref AwsAccountId, '']]
 
 Globals:
   Function:
@@ -224,12 +240,12 @@ Resources:
           AUDIT_TABLE_NAME: !Ref AuditTable
           KMS_KEY_ID: !Ref OpsAgentKMSKey
           API_KEY_PARAMETER: !Ref ApiKeyParameterName
-          TEAMS_BOT_APP_ID: "7245659a-25f0-455c-9a75-06451e81fc3e"
-          AZURE_TENANT_ID: "78952f68-6959-4fc9-a579-af36c10eee5c"
-          AWS_ACCOUNT_ID: !Ref AWS::AccountId
-          TEAMS_BOT_APP_ID: "7245659a-25f0-455c-9a75-06451e81fc3e"
-          AZURE_TENANT_ID: "78952f68-6959-4fc9-a579-af36c10eee5c"
-          AWS_ACCOUNT_ID: !Ref "AWS::AccountId"
+          TEAMS_BOT_APP_ID: !Ref TeamsBotAppId
+          AZURE_TENANT_ID: !Ref AzureTenantId
+          AWS_ACCOUNT_ID: !If
+            - HasCustomAwsAccountId
+            - !Ref AwsAccountId
+            - !Ref AWS::AccountId
       Tags:
         Project: OpsAgent
         Environment: !Ref Environment

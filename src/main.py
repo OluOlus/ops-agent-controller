@@ -12,7 +12,7 @@ import hmac
 import base64
 
 from models import InternalMessage, ChannelType, ExecutionMode, validate_message_text, validate_user_id
-from channel_adapters import WebChannelAdapter, create_channel_adapter, ChannelAdapter
+from channel_adapters import WebChannelAdapter, create_channel_adapter, ChannelAdapter, detect_channel_type
 from llm_provider import create_llm_provider, LLMProviderError
 from tool_execution_engine import ToolExecutionEngine, ExecutionContext
 from approval_gate import ApprovalGate
@@ -335,10 +335,10 @@ def create_success_response(data: Dict[str, Any], correlation_id: Optional[str] 
         "data": data,
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
-    
+
     if correlation_id:
         response_body["correlationId"] = correlation_id
-    
+
     return {
         "statusCode": 200,
         "headers": {
@@ -348,6 +348,57 @@ def create_success_response(data: Dict[str, Any], correlation_id: Optional[str] 
             "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
         },
         "body": json.dumps(response_body)
+    }
+
+
+def create_bot_framework_response(
+    text: str,
+    incoming_activity: Dict[str, Any],
+    bot_id: Optional[str] = None,
+    correlation_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Create Bot Framework Activity response for Teams/Azure Bot Service
+
+    Args:
+        text: The message text to send
+        incoming_activity: The original incoming Activity from Teams
+        bot_id: Bot application ID
+        correlation_id: Optional correlation ID for tracking
+
+    Returns:
+        Lambda response with Bot Framework Activity in the body
+    """
+    if bot_id is None:
+        bot_id = os.environ.get("TEAMS_BOT_APP_ID", "unknown")
+
+    # Create Bot Framework Activity response
+    activity = {
+        "type": "message",
+        "text": text,
+        "from": {
+            "id": f"28:{bot_id}",
+            "name": "OpsAgent AWS"
+        },
+        "conversation": incoming_activity.get("conversation", {}),
+        "recipient": incoming_activity.get("from", {}),
+        "replyToId": incoming_activity.get("id"),
+        "serviceUrl": incoming_activity.get("serviceUrl"),
+        "channelId": incoming_activity.get("channelId", "msteams")
+    }
+
+    # Add correlation ID if provided
+    if correlation_id:
+        if "channelData" not in activity:
+            activity["channelData"] = {}
+        activity["channelData"]["correlationId"] = correlation_id
+
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/json"
+        },
+        "body": json.dumps(activity)
     }
 
 
@@ -462,7 +513,6 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     
     try:
         # Create appropriate channel adapter
-        from .channel_adapters import detect_channel_type
         channel_type = detect_channel_type(event)
         channel_adapter = create_channel_adapter(channel_type)
         
@@ -492,31 +542,41 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
                 )
 
         # Get or create system components
-        llm_provider, tool_execution_engine, approval_gate, audit_logger = get_or_create_components(
+        llm_provider, tool_execution_engine, approval_gate, audit_logger, teams_auth_handler = get_or_create_components(
             effective_execution_mode
         )
         teams_auth_handler = _teams_auth_handler
         
         # Handle Teams authentication
         if channel_type == ChannelType.TEAMS:
+            # Get the original Bot Framework Activity for response
+            try:
+                if isinstance(event.get("body"), str):
+                    incoming_activity = json.loads(event["body"])
+                else:
+                    incoming_activity = event.get("body", {})
+            except (json.JSONDecodeError, TypeError):
+                incoming_activity = {}
+
             # Check for authentication commands
             message_lower = internal_message.message_text.lower().strip()
-            
+
             if message_lower == "login":
-                # Create authentication card
-                auth_card = teams_auth_handler.create_auth_card(
-                    internal_message.user_id,
-                    internal_message.channel_conversation_id
+                # For now, return simple login message
+                # TODO: Implement OAuth card with adaptive card format
+                login_message = (
+                    "🔑 **AWS Authentication**\n\n"
+                    "To authenticate with AWS, you'll need to complete the OAuth flow.\n\n"
+                    "This feature is coming soon! For now, you can test other commands like `health` or `help`."
                 )
-                return create_success_response(auth_card, correlation_id)
-            
+                return create_bot_framework_response(login_message, incoming_activity, correlation_id=correlation_id)
+
             elif message_lower == "logout":
                 # Clear user session
                 teams_auth_handler.clear_user_session(internal_message.user_id)
                 logout_message = "🚪 You have been signed out. Send `login` to authenticate again."
-                channel_response = channel_adapter.format_response(logout_message, correlation_id)
-                return create_success_response(channel_response.to_dict(), correlation_id)
-            
+                return create_bot_framework_response(logout_message, incoming_activity, correlation_id=correlation_id)
+
             elif message_lower == "whoami":
                 # Show current authentication status
                 user_session = teams_auth_handler.get_user_session(internal_message.user_id)
@@ -531,20 +591,17 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
                     )
                 else:
                     whoami_message = "❌ **Not Authenticated**\n\nSend `login` to authenticate with AWS."
-                
-                channel_response = channel_adapter.format_response(whoami_message, correlation_id)
-                return create_success_response(channel_response.to_dict(), correlation_id)
-            
-            # Check if user is authenticated for other commands
-            if not teams_auth_handler.is_user_authenticated(internal_message.user_id):
-                # User needs to authenticate
-                auth_message = (
-                    "🔐 **Authentication Required**\n\n"
-                    "You need to authenticate with AWS before using this command.\n\n"
-                    "Send `login` to get started."
-                )
-                channel_response = channel_adapter.format_response(auth_message, correlation_id)
-                return create_success_response(channel_response.to_dict(), correlation_id)
+                return create_bot_framework_response(whoami_message, incoming_activity, correlation_id=correlation_id)
+
+            # For commands that don't require authentication, skip the check temporarily
+            # TODO: Re-enable authentication check after OAuth flow is fully implemented
+            # if not teams_auth_handler.is_user_authenticated(internal_message.user_id):
+            #     auth_message = (
+            #         "🔐 **Authentication Required**\n\n"
+            #         "You need to authenticate with AWS before using this command.\n\n"
+            #         "Send `login` to get started."
+            #     )
+            #     return create_bot_framework_response(auth_message, incoming_activity, correlation_id=correlation_id)
         
         # Log the incoming request
         audit_logger.log_request_received(internal_message)
@@ -744,7 +801,7 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         if internal_message and correlation_id:
             # Log error if we have context
             try:
-                _, _, _, audit_logger = get_or_create_components(effective_execution_mode)
+                _, _, _, audit_logger, _ = get_or_create_components(effective_execution_mode)
                 audit_logger.log_error(e, correlation_id, internal_message.user_id, {"step": "validation"})
             except:
                 pass
@@ -754,7 +811,7 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         if internal_message and correlation_id:
             # Log error if we have context
             try:
-                _, _, _, audit_logger = get_or_create_components(effective_execution_mode)
+                _, _, _, audit_logger, _ = get_or_create_components(effective_execution_mode)
                 audit_logger.log_error(e, correlation_id, internal_message.user_id, {"step": "processing"})
             except:
                 pass
@@ -829,7 +886,7 @@ def handle_approval_response(
             return create_success_response(channel_response.to_dict(), correlation_id)
         
         # Get system components
-        llm_provider, tool_execution_engine, _, _ = get_or_create_components(effective_execution_mode)
+        llm_provider, tool_execution_engine, _, _, _ = get_or_create_components(effective_execution_mode)
         
         # Execute the approved tool
         execution_context = ExecutionContext(
@@ -1044,7 +1101,7 @@ def health_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         
         # Initialize components to check their status
         try:
-            llm_provider, tool_execution_engine, approval_gate, audit_logger = get_or_create_components(execution_mode)
+            llm_provider, tool_execution_engine, approval_gate, audit_logger, _ = get_or_create_components(execution_mode)
             
             # Add component status to system status
             system_status["components"] = {
@@ -1176,4 +1233,4 @@ def lambda_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
     """
     Main Lambda entry point - routes to appropriate handler
     """
-    return health_handler(event, context)
+    return request_handler(event, context)

@@ -8,8 +8,6 @@ import os
 import boto3
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
-import jwt as pyjwt
-import requests
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -92,11 +90,15 @@ class TeamsAuthHandler:
         state = f"{teams_user_id}:{conversation_id}:{datetime.utcnow().timestamp()}"
         
         # OAuth URL for Azure AD authentication
+        # Get API Gateway URL from environment or use default
+        api_gateway_url = os.environ.get("API_GATEWAY_URL", "https://xt3qtho8l6.execute-api.eu-west-2.amazonaws.com/sandbox")
+        redirect_uri = f"{api_gateway_url}/auth/callback"
+
         auth_url = (
             f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/authorize?"
             f"client_id={self.bot_app_id}&"
             f"response_type=code&"
-            f"redirect_uri=https://xt3qtho8l6.execute-api.eu-west-2.amazonaws.com/sandbox/auth/callback&"
+            f"redirect_uri={redirect_uri}&"
             f"scope=openid profile User.Read&"
             f"state={state}&"
             f"response_mode=query"
@@ -189,45 +191,17 @@ class TeamsAuthHandler:
     
     def _exchange_auth_code(self, auth_code: str) -> Optional[Dict[str, Any]]:
         """Exchange authorization code for tokens"""
-        try:
-            # Get client secret from SSM
-            ssm = boto3.client('ssm', region_name=self.aws_region)
-            client_secret = ssm.get_parameter(
-                Name='/opsagent/teams-bot-app-secret',
-                WithDecryption=True
-            )['Parameter']['Value']
-            
-            token_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
-            
-            data = {
-                'client_id': self.bot_app_id,
-                'client_secret': client_secret,
-                'code': auth_code,
-                'grant_type': 'authorization_code',
-                'redirect_uri': 'https://xt3qtho8l6.execute-api.eu-west-2.amazonaws.com/sandbox/auth/callback'
-            }
-            
-            response = requests.post(token_url, data=data)
-            response.raise_for_status()
-            
-            return response.json()
-            
-        except Exception as e:
-            logger.error(f"Token exchange error: {e}")
-            return None
+        # TODO: Implement OAuth token exchange
+        # This requires the requests library which needs to be properly packaged
+        logger.warning("OAuth token exchange not implemented yet")
+        return None
     
     def _get_user_info(self, access_token: str) -> Optional[Dict[str, Any]]:
         """Get user information from Microsoft Graph"""
-        try:
-            headers = {'Authorization': f'Bearer {access_token}'}
-            response = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers)
-            response.raise_for_status()
-            
-            return response.json()
-            
-        except Exception as e:
-            logger.error(f"User info error: {e}")
-            return None
+        # TODO: Implement Microsoft Graph API call
+        # This requires the requests library which needs to be properly packaged
+        logger.warning("Microsoft Graph API call not implemented yet")
+        return None
     
     def _validate_user_organization(self, user_info: Dict[str, Any]) -> bool:
         """Validate user belongs to authorized organization"""
