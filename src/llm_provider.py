@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 try:
-    from src.models import ToolCall, ExecutionMode
+    from models import ToolCall, ExecutionMode
 except ImportError:
     # Fallback for direct execution
     from models import ToolCall, ExecutionMode

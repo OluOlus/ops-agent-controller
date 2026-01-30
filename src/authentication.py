@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import boto3
 from botocore.exceptions import ClientError
 
-from src.models import UserContext, generate_correlation_id
+from models import UserContext, generate_correlation_id
 
 logger = logging.getLogger(__name__)
 

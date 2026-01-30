@@ -13,13 +13,13 @@ import base64
 
 import requests
 
-from src.models import InternalMessage, ChannelType, ExecutionMode, validate_message_text, validate_user_id, generate_correlation_id
-from src.channel_adapters import WebChannelAdapter, create_channel_adapter, ChannelAdapter, detect_channel_type
-from src.llm_provider import create_llm_provider, LLMProviderError
-from src.tool_execution_engine import ToolExecutionEngine, ExecutionContext
-from src.approval_gate import ApprovalGate
-from src.audit_logger import AuditLogger
-from src.authentication import authenticate_and_authorize_request, get_user_authenticator, get_signature_validator
+from models import InternalMessage, ChannelType, ExecutionMode, validate_message_text, validate_user_id, generate_correlation_id
+from channel_adapters import WebChannelAdapter, create_channel_adapter, ChannelAdapter, detect_channel_type
+from llm_provider import create_llm_provider, LLMProviderError
+from tool_execution_engine import ToolExecutionEngine, ExecutionContext
+from approval_gate import ApprovalGate
+from audit_logger import AuditLogger
+from authentication import authenticate_and_authorize_request, get_user_authenticator, get_signature_validator
 # Teams authentication handled by Amazon Q Business natively
 
 # Configure logging
@@ -651,6 +651,10 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
             except (json.JSONDecodeError, TypeError):
                 incoming_activity = {}
 
+        # Normalize the incoming message first (needed for authentication)
+        internal_message = channel_adapter.normalize_message(event)
+        correlation_id = internal_message.correlation_id
+
         # Validate request authenticity and authenticate user
         if channel_type != ChannelType.TEAMS:
             # For non-Teams requests, use comprehensive authentication
@@ -692,10 +696,6 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
             # Update internal message with authenticated user context
             internal_message.user_id = user_context.user_id
             internal_message.user_context = user_context
-
-        # Normalize the incoming message
-        internal_message = channel_adapter.normalize_message(event)
-        correlation_id = internal_message.correlation_id
 
         logger.info(f"Processing chat message: {correlation_id}")
         
@@ -1137,7 +1137,7 @@ def plugin_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                 request_body = event.get("body", {})
             
             # Validate plugin request structure
-            from src.models import validate_plugin_request
+            from models import validate_plugin_request
             plugin_request = validate_plugin_request(request_body)
             
         except ValueError as e:
@@ -1172,7 +1172,12 @@ def plugin_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         if operation in diagnostic_operations:
             return handle_diagnostic_operation(plugin_request, execution_mode, tool_execution_engine, audit_logger, correlation_id)
         elif operation in write_operations:
-            return handle_write_operation(plugin_request, execution_mode, approval_gate, audit_logger, correlation_id)
+            # Write operations cannot be called directly - must use propose_action → approve_action workflow
+            return create_error_response(
+                400,
+                f"Write operation '{operation}' requires approval. Use 'propose_action' with action='{operation}' to initiate the approval workflow.",
+                correlation_id
+            )
         elif operation in workflow_operations:
             return handle_workflow_operation(plugin_request, execution_mode, tool_execution_engine, audit_logger, correlation_id)
         elif operation == "propose_action":
@@ -1192,7 +1197,7 @@ def handle_diagnostic_operation(plugin_request, execution_mode, tool_execution_e
     """Handle diagnostic operations that require no approval"""
     try:
         # Create tool call from plugin request
-        from src.models import ToolCall, PluginResponse
+        from models import ToolCall, PluginResponse
         tool_call = ToolCall(
             tool_name=plugin_request.operation,
             args=plugin_request.parameters,
@@ -1260,7 +1265,7 @@ def handle_propose_action(plugin_request, execution_mode, approval_gate, audit_l
             return create_error_response(400, "Missing or insufficient 'reason' parameter (minimum 10 characters required)", correlation_id)
         
         # Create tool call for the proposed action
-        from src.models import ToolCall
+        from models import ToolCall
         tool_call = ToolCall(
             tool_name=action,
             args={k: v for k, v in plugin_request.parameters.items() if k not in ["action", "reason"]},
@@ -1295,7 +1300,7 @@ def handle_propose_action(plugin_request, execution_mode, approval_gate, audit_l
         action_plan = _generate_action_plan(action, plugin_request.parameters, reason)
         
         # Format response
-        from src.models import PluginResponse
+        from models import PluginResponse
         response = PluginResponse(
             success=True,
             correlation_id=correlation_id,
@@ -1354,7 +1359,7 @@ def _generate_action_plan(action: str, parameters: dict, reason: str) -> str:
 def handle_approve_action(plugin_request, execution_mode, tool_execution_engine, approval_gate, audit_logger, correlation_id):
     """Handle action approval and execution"""
     try:
-        from src.models import PluginResponse
+        from models import PluginResponse
         
         # Extract approval token
         approval_token = plugin_request.parameters.get("approval_token")
@@ -1387,7 +1392,7 @@ def handle_approve_action(plugin_request, execution_mode, tool_execution_engine,
         if not approval_request.tool_call:
             return create_error_response(500, "Approval request missing tool call", correlation_id)
         
-        from src.tool_execution_engine import ExecutionContext
+        from tool_execution_engine import ExecutionContext
         execution_context = ExecutionContext(
             correlation_id=correlation_id,
             user_id=plugin_request.user_context.user_id,
@@ -1441,7 +1446,7 @@ def handle_workflow_operation(plugin_request, execution_mode, tool_execution_eng
     """Handle workflow operations (incident records, notifications)"""
     try:
         # Create tool call from plugin request
-        from src.models import ToolCall
+        from models import ToolCall
         tool_call = ToolCall(
             tool_name=plugin_request.operation,
             args=plugin_request.parameters,
@@ -1466,7 +1471,7 @@ def handle_workflow_operation(plugin_request, execution_mode, tool_execution_eng
         
         # Format response based on operation type
         if tool_results and tool_results[0].success:
-            from src.models import PluginResponse
+            from models import PluginResponse
             
             if plugin_request.operation == "create_incident_record":
                 response = PluginResponse(
@@ -1532,23 +1537,7 @@ def auth_callback_handler(event: Dict[str, Any], context: Any = None) -> Dict[st
     except Exception as e:
         logger.error(f"Auth callback handler error: {str(e)}")
         return create_error_response(500, "Internal server error")
-    """
-    Handle authentication callback requests (placeholder for future OAuth flows)
-    Requirements: 8.1, 8.2
-    """
-    try:
-        # For Amazon Q Business integration, authentication is handled natively
-        # This endpoint is reserved for future OAuth callback implementations
-        
-        return create_success_response({
-            "message": "Authentication is handled natively by Amazon Q Business",
-            "status": "not_implemented",
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        })
-        
-    except Exception as e:
-        logger.error(f"Auth callback handler error: {str(e)}")
-        return create_error_response(500, "Internal server error")
+
 
 def options_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     """
