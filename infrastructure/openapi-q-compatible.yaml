@@ -1,0 +1,612 @@
+openapi: 3.0.0
+info:
+  title: OpsAgent Actions API - Amazon Q Business Compatible
+  version: 1.0.0
+  description: |
+    Secure AWS operations for platform engineers via Amazon Q Business.
+    
+    This API provides 6 operations focused on security-first AI→Ops actions:
+    - **3 Diagnostic Operations**: Read-only AWS resource diagnostics
+    - **2 Approval Operations**: Secure write action workflow (propose → approve)
+    - **1 Workflow Operation**: Incident management
+    
+    **Key Innovation**: Approval-gated write operations with tag scoping, execution modes, and full audit trails.
+  contact:
+    name: Platform Engineering Team
+  license:
+    name: MIT
+
+servers:
+  - url: https://api.opsagent.company.com/v1
+    description: Production API
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /diagnostic/ec2-status:
+    post:
+      summary: Get EC2 instance status and metrics
+      description: |
+        Get EC2 instance state, CPU average over last 15m, and alarm status.
+        Returns summary + detailed JSON for Amazon Q Business compatibility.
+      operationId: getEC2Status
+      tags:
+        - Diagnostics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EC2StatusRequest'
+      responses:
+        '200':
+          description: EC2 status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /diagnostic/alb-health:
+    post:
+      summary: Check ALB target health
+      description: |
+        Check Application Load Balancer target health status.
+        Returns healthy/unhealthy counts + detailed JSON.
+      operationId: checkALBHealth
+      tags:
+        - Diagnostics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ALBHealthRequest'
+      responses:
+        '200':
+          description: ALB health status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /diagnostic/ecs-service:
+    post:
+      summary: Get ECS service status
+      description: |
+        Get ECS service desired/running count and deployment status.
+        Simpler than CloudTrail, more reliable for demos.
+      operationId: getECSServiceStatus
+      tags:
+        - Diagnostics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ECSServiceRequest'
+      responses:
+        '200':
+          description: ECS service status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /action/propose:
+    post:
+      summary: Propose write action for approval
+      description: |
+        Propose a write operation (reboot EC2 or scale ECS) that requires approval.
+        Returns approval token with 15-minute expiry.
+        
+        **Security**: Validates resource tags (OpsAgentManaged=true) before creating token.
+      operationId: proposeAction
+      tags:
+        - Approval Workflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposeActionRequest'
+      responses:
+        '200':
+          description: Action proposal created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposeActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /action/approve:
+    post:
+      summary: Execute approved action
+      description: |
+        Execute a previously approved write operation using approval token.
+        Token must be valid, unexpired, and unused.
+        
+        **Security**: Validates token, user authorization, and resource tags before execution.
+      operationId: approveAction
+      tags:
+        - Approval Workflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveActionRequest'
+      responses:
+        '200':
+          description: Action executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApproveActionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '410':
+          description: Approval token expired or already used
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /workflow/incident:
+    post:
+      summary: Create incident record
+      description: |
+        Create incident record for workflow management.
+        No approval required but fully audited.
+      operationId: createIncident
+      tags:
+        - Workflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIncidentRequest'
+      responses:
+        '200':
+          description: Incident created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Returns system health and execution mode
+      operationId: healthCheck
+      tags:
+        - System
+      security: []
+      responses:
+        '200':
+          description: System is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for Amazon Q Business plugin authentication
+
+  schemas:
+    # Request Schemas (Amazon Q Business compatible - no arrays)
+    EC2StatusRequest:
+      type: object
+      required:
+        - instance_id
+        - user_context
+      properties:
+        instance_id:
+          type: string
+          pattern: '^i-[0-9a-f]{8,17}$'
+          description: EC2 instance ID
+        metrics:
+          type: string
+          enum: [cpu, memory, network, all]
+          default: cpu
+          description: Metrics to include (single value, not array)
+        time_window:
+          type: string
+          enum: [5m, 15m, 30m, 1h]
+          default: 15m
+          description: Time window for metrics
+        user_context:
+          $ref: '#/components/schemas/UserContext'
+
+    ALBHealthRequest:
+      type: object
+      required:
+        - user_context
+      properties:
+        alb_arn:
+          type: string
+          pattern: '^arn:aws:elasticloadbalancing:[a-z0-9-]+:[0-9]{12}:loadbalancer/app/[a-zA-Z0-9-]+/[a-f0-9]{16}$'
+          description: Application Load Balancer ARN
+        target_group_arn:
+          type: string
+          pattern: '^arn:aws:elasticloadbalancing:[a-z0-9-]+:[0-9]{12}:targetgroup/[a-zA-Z0-9-]+/[a-f0-9]{16}$'
+          description: Target Group ARN
+        user_context:
+          $ref: '#/components/schemas/UserContext'
+      oneOf:
+        - required: [alb_arn]
+        - required: [target_group_arn]
+
+    ECSServiceRequest:
+      type: object
+      required:
+        - cluster
+        - service
+        - user_context
+      properties:
+        cluster:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: ECS cluster name
+        service:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: ECS service name
+        user_context:
+          $ref: '#/components/schemas/UserContext'
+
+    ProposeActionRequest:
+      type: object
+      required:
+        - action_type
+        - reason
+        - user_context
+      properties:
+        action_type:
+          type: string
+          enum: [reboot_ec2, scale_ecs_service]
+          description: Type of write action to propose
+        instance_id:
+          type: string
+          pattern: '^i-[0-9a-f]{8,17}$'
+          description: EC2 instance ID (required for reboot_ec2)
+        cluster:
+          type: string
+          description: ECS cluster name (required for scale_ecs_service)
+        service:
+          type: string
+          description: ECS service name (required for scale_ecs_service)
+        desired_count:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Desired task count (required for scale_ecs_service)
+        reason:
+          type: string
+          minLength: 10
+          maxLength: 500
+          description: Justification for the action
+        user_context:
+          $ref: '#/components/schemas/UserContext'
+
+    ApproveActionRequest:
+      type: object
+      required:
+        - approval_token
+        - user_context
+      properties:
+        approval_token:
+          type: string
+          pattern: '^approve-[a-zA-Z0-9]{12,}$'
+          description: Approval token from propose_action response
+        user_context:
+          $ref: '#/components/schemas/UserContext'
+
+    CreateIncidentRequest:
+      type: object
+      required:
+        - summary
+        - severity
+        - user_context
+      properties:
+        summary:
+          type: string
+          minLength: 10
+          maxLength: 500
+          description: Incident summary
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+          description: Incident severity level
+        links:
+          type: string
+          description: Comma-separated list of related links (not array for Q compatibility)
+        user_context:
+          $ref: '#/components/schemas/UserContext'
+
+    UserContext:
+      type: object
+      required:
+        - user_id
+      properties:
+        user_id:
+          type: string
+          format: email
+          description: User email address
+        teams_tenant:
+          type: string
+          description: Microsoft Teams tenant ID
+        session_id:
+          type: string
+          description: Amazon Q Business session ID
+
+    # Response Schemas (Amazon Q Business compatible)
+    DiagnosticResponse:
+      type: object
+      required:
+        - result
+        - summary
+        - correlation_id
+      properties:
+        result:
+          type: string
+          enum: [OK, ERROR, WOULD_EXECUTE]
+          description: Operation result status
+        summary:
+          type: string
+          description: Human-readable summary for chat display
+        details_json:
+          type: string
+          description: Detailed AWS data as JSON string (avoids array limitations)
+        execution_mode:
+          type: string
+          enum: [LOCAL_MOCK, DRY_RUN, SANDBOX_LIVE]
+          description: Current execution mode
+        correlation_id:
+          type: string
+          description: Unique request identifier
+        error_message:
+          type: string
+          description: Error details if result is ERROR
+
+    ProposeActionResponse:
+      type: object
+      required:
+        - result
+        - summary
+        - correlation_id
+      properties:
+        result:
+          type: string
+          enum: [OK, ERROR]
+          description: Proposal result status
+        summary:
+          type: string
+          description: Action summary and approval instructions
+        approval_token:
+          type: string
+          description: Token for approving the action
+        expires_at:
+          type: string
+          format: date-time
+          description: Token expiration time (ISO 8601)
+        risk_level:
+          type: string
+          enum: [low, medium, high]
+          description: Risk assessment
+        action_plan:
+          type: string
+          description: Detailed action plan as string
+        correlation_id:
+          type: string
+          description: Unique request identifier
+        error_message:
+          type: string
+          description: Error details if result is ERROR
+
+    ApproveActionResponse:
+      type: object
+      required:
+        - result
+        - summary
+        - correlation_id
+      properties:
+        result:
+          type: string
+          enum: [OK, ERROR, WOULD_EXECUTE]
+          description: Execution result status
+        summary:
+          type: string
+          description: Execution summary for chat display
+        action_executed:
+          type: string
+          description: Name of executed action
+        target_resource:
+          type: string
+          description: Resource that was modified
+        execution_status:
+          type: string
+          enum: [completed, failed, simulated]
+          description: Execution outcome
+        execution_time:
+          type: string
+          format: date-time
+          description: When the action was executed
+        correlation_id:
+          type: string
+          description: Unique request identifier
+        error_message:
+          type: string
+          description: Error details if result is ERROR
+
+    WorkflowResponse:
+      type: object
+      required:
+        - result
+        - summary
+        - correlation_id
+      properties:
+        result:
+          type: string
+          enum: [OK, ERROR]
+          description: Workflow operation result
+        summary:
+          type: string
+          description: Operation summary for chat display
+        incident_id:
+          type: string
+          description: Created incident ID
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        correlation_id:
+          type: string
+          description: Unique request identifier
+        error_message:
+          type: string
+          description: Error details if result is ERROR
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - execution_mode
+        - version
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: Overall system health
+        execution_mode:
+          type: string
+          enum: [LOCAL_MOCK, DRY_RUN, SANDBOX_LIVE]
+          description: Current execution mode
+        version:
+          type: string
+          description: API version
+        timestamp:
+          type: string
+          format: date-time
+          description: Health check timestamp
+        services_status:
+          type: string
+          description: Service health as string (not object for Q compatibility)
+
+    ErrorResponse:
+      type: object
+      required:
+        - result
+        - error_message
+      properties:
+        result:
+          type: string
+          enum: [ERROR]
+          description: Always ERROR for error responses
+        error_message:
+          type: string
+          description: Human-readable error message
+        error_code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - AUTHENTICATION_ERROR
+            - AUTHORIZATION_ERROR
+            - RESOURCE_NOT_FOUND
+            - RESOURCE_NOT_TAGGED
+            - TOKEN_EXPIRED
+            - TOKEN_INVALID
+            - AWS_API_ERROR
+            - SYSTEM_ERROR
+          description: Error code for programmatic handling
+        correlation_id:
+          type: string
+          description: Request correlation ID
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+tags:
+  - name: Diagnostics
+    description: Read-only AWS resource diagnostics (3 operations)
+  - name: Approval Workflow
+    description: Secure write operations with approval (2 operations)
+  - name: Workflow
+    description: Incident management (1 operation)
+  - name: System
+    description: System health and status
+
+externalDocs:
+  description: OpsAgent Actions Documentation
+  url: https://docs.opsagent.company.com/api

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import json
 import logging
 
-from models import ToolCall, ApprovalRequest, ExecutionMode, generate_correlation_id
+from src.models import ToolCall, ApprovalRequest, ExecutionMode, generate_correlation_id
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ class ApprovalGate:
         approval_request = ApprovalRequest(
             token=self.generate_approval_token(),
             expires_at=expires_at,
-            requested_by=requested_by,
+            user_id=requested_by,
             tool_call=tool_call,
             risk_level=risk_level,
             correlation_id=tool_call.correlation_id
@@ -157,7 +157,7 @@ class ApprovalGate:
             return False, "Tool call does not match approved request"
         
         # Check if user is authorized (for MVP, same user who requested)
-        if approval_request.requested_by != user_id:
+        if approval_request.user_id != user_id:
             return False, "User not authorized to use this token"
         
         return True, "Token is valid"
@@ -189,7 +189,7 @@ class ApprovalGate:
             raise ValueError("Token has expired")
         
         # For MVP, only the requester can approve their own request
-        if approval_request.requested_by != user_id:
+        if approval_request.user_id != user_id:
             raise ValueError("User not authorized to approve this request")
         
         decision = ApprovalDecision(
@@ -239,7 +239,7 @@ class ApprovalGate:
     def format_approval_request_for_chat(
         self,
         approval_request: ApprovalRequest,
-        execution_mode: ExecutionMode = ExecutionMode.DRY_RUN
+        execution_mode: ExecutionMode = ExecutionMode.SANDBOX_LIVE
     ) -> Dict[str, Any]:
         """
         Format an approval request for display in chat interfaces
@@ -266,8 +266,6 @@ class ApprovalGate:
         
         # Determine action description based on execution mode
         mode_description = {
-            ExecutionMode.LOCAL_MOCK: "SIMULATE",
-            ExecutionMode.DRY_RUN: "SIMULATE (dry-run)",
             ExecutionMode.SANDBOX_LIVE: "EXECUTE"
         }.get(execution_mode, "EXECUTE")
         
@@ -297,12 +295,12 @@ class ApprovalGate:
             "actions": [
                 {
                     "type": "approve",
-                    "label": f"✅ Approve {mode_description}",
+                    "label": f"Approve {mode_description}",
                     "token": approval_request.token
                 },
                 {
                     "type": "deny", 
-                    "label": "❌ Deny",
+                    "label": "Deny",
                     "token": approval_request.token
                 }
             ]
@@ -345,7 +343,7 @@ class ApprovalGate:
         pending = []
         
         for request in self._pending_approvals.values():
-            if (request.requested_by == user_id and 
+            if (request.user_id == user_id and 
                 current_time <= request.expires_at and
                 request.token not in self._used_tokens):
                 pending.append(request)

@@ -1,7 +1,0 @@
-[
-  {
-    "op": "replace",
-    "path": "/cloudwatchRoleArn",
-    "value": "arn:aws:iam::612176863084:role/APIGatewayCloudWatchLogsRole-EU"
-  }
-]

@@ -202,6 +202,90 @@ class SmokeTestRunner:
         
         return success
     
+    def run_infrastructure_provisioning_tests(self) -> bool:
+        """Run infrastructure provisioning validation tests"""
+        self.log("INFO", "=" * 60)
+        self.log("INFO", "RUNNING INFRASTRUCTURE PROVISIONING TESTS")
+        self.log("INFO", "=" * 60)
+        
+        success, stdout, stderr = self.run_pytest_suite(
+            "test_infrastructure_provisioning.py",
+            "infrastructure_provisioning",
+            timeout=300
+        )
+        
+        if success:
+            self.log("INFO", "✅ Infrastructure provisioning tests PASSED")
+        else:
+            self.log("ERROR", "❌ Infrastructure provisioning tests FAILED")
+            if stderr:
+                self.log("ERROR", f"Error output: {stderr}")
+        
+        return success
+    
+    def run_plugin_operations_validation_tests(self) -> bool:
+        """Run plugin operations validation tests for all 8 operations"""
+        self.log("INFO", "=" * 60)
+        self.log("INFO", "RUNNING PLUGIN OPERATIONS VALIDATION TESTS")
+        self.log("INFO", "=" * 60)
+        
+        success, stdout, stderr = self.run_pytest_suite(
+            "test_plugin_operations.py",
+            "plugin_operations",
+            timeout=240
+        )
+        
+        if success:
+            self.log("INFO", "✅ Plugin operations validation tests PASSED")
+        else:
+            self.log("ERROR", "❌ Plugin operations validation tests FAILED")
+            if stderr:
+                self.log("ERROR", f"Error output: {stderr}")
+        
+        return success
+    
+    def run_end_to_end_workflow_tests(self) -> bool:
+        """Run end-to-end approval workflow tests"""
+        self.log("INFO", "=" * 60)
+        self.log("INFO", "RUNNING END-TO-END WORKFLOW TESTS")
+        self.log("INFO", "=" * 60)
+        
+        success, stdout, stderr = self.run_pytest_suite(
+            "test_integration.py::TestSystemIntegration::test_end_to_end_remediation_flow",
+            "end_to_end_workflow",
+            timeout=180
+        )
+        
+        if success:
+            self.log("INFO", "✅ End-to-end workflow tests PASSED")
+        else:
+            self.log("ERROR", "❌ End-to-end workflow tests FAILED")
+            if stderr:
+                self.log("ERROR", f"Error output: {stderr}")
+        
+        return success
+    
+    def run_monitoring_integration_tests(self) -> bool:
+        """Run monitoring and integration tests"""
+        self.log("INFO", "=" * 60)
+        self.log("INFO", "RUNNING MONITORING INTEGRATION TESTS")
+        self.log("INFO", "=" * 60)
+        
+        success, stdout, stderr = self.run_pytest_suite(
+            "test_infrastructure_provisioning.py::TestInfrastructurePerformance",
+            "monitoring_integration",
+            timeout=300
+        )
+        
+        if success:
+            self.log("INFO", "✅ Monitoring integration tests PASSED")
+        else:
+            self.log("ERROR", "❌ Monitoring integration tests FAILED")
+            if stderr:
+                self.log("ERROR", f"Error output: {stderr}")
+        
+        return success
+    
     def run_diagnosis_tools_tests(self) -> bool:
         """Run diagnosis tools validation tests"""
         self.log("INFO", "=" * 60)
@@ -304,9 +388,13 @@ class SmokeTestRunner:
         # Run all test suites
         test_suites = [
             ("Infrastructure Smoke Tests", self.run_infrastructure_smoke_tests),
+            ("Infrastructure Provisioning Tests", self.run_infrastructure_provisioning_tests),
+            ("Plugin Operations Validation Tests", self.run_plugin_operations_validation_tests),
             ("Diagnosis Tools Tests", self.run_diagnosis_tools_tests),
             ("Approval Gate Tests", self.run_approval_gate_tests),
+            ("End-to-End Workflow Tests", self.run_end_to_end_workflow_tests),
             ("Audit Logging Tests", self.run_audit_logging_tests),
+            ("Monitoring Integration Tests", self.run_monitoring_integration_tests),
             ("Deployed Readiness Tests", self.run_deployed_readiness_tests)
         ]
         

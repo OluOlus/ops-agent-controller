@@ -102,7 +102,7 @@ class TestSystemIntegration:
         """Test that all components are properly initialized"""
         execution_mode = ExecutionMode.LOCAL_MOCK
         
-        llm_provider, tool_execution_engine, approval_gate, audit_logger = get_or_create_components(execution_mode)
+        llm_provider, tool_execution_engine, approval_gate, audit_logger, _ = get_or_create_components(execution_mode)
         
         # Check LLM provider
         assert llm_provider is not None
@@ -178,7 +178,7 @@ class TestSystemIntegration:
         """Test that components properly switch execution modes"""
         # Start with LOCAL_MOCK
         execution_mode1 = ExecutionMode.LOCAL_MOCK
-        llm_provider1, tool_engine1, approval_gate1, audit_logger1 = get_or_create_components(execution_mode1)
+        llm_provider1, tool_engine1, approval_gate1, audit_logger1, _ = get_or_create_components(execution_mode1)
         
         assert tool_engine1.execution_mode == execution_mode1
         assert audit_logger1.execution_mode == execution_mode1
@@ -196,7 +196,7 @@ class TestSystemIntegration:
     def test_llm_tool_execution_integration(self):
         """Test LLM provider and tool execution engine integration"""
         with patch.dict(os.environ, {"EXECUTION_MODE": "LOCAL_MOCK"}):
-            llm_provider, tool_execution_engine, _, _ = get_or_create_components(ExecutionMode.LOCAL_MOCK)
+            llm_provider, tool_execution_engine, _, _, _ = get_or_create_components(ExecutionMode.LOCAL_MOCK)
             
             # Generate tool calls
             llm_response = llm_provider.generate_tool_calls(
@@ -231,7 +231,7 @@ class TestSystemIntegration:
     def test_approval_gate_integration(self):
         """Test approval gate integration with tool execution"""
         with patch.dict(os.environ, {"EXECUTION_MODE": "LOCAL_MOCK"}):
-            llm_provider, tool_execution_engine, approval_gate, _ = get_or_create_components(ExecutionMode.LOCAL_MOCK)
+            llm_provider, tool_execution_engine, approval_gate, _, _ = get_or_create_components(ExecutionMode.LOCAL_MOCK)
             
             # Generate tool calls that require approval
             llm_response = llm_provider.generate_tool_calls(
@@ -268,7 +268,7 @@ class TestSystemIntegration:
         with patch.dict(os.environ, {"EXECUTION_MODE": "LOCAL_MOCK"}):
             from src.models import InternalMessage
             
-            _, _, _, audit_logger = get_or_create_components(ExecutionMode.LOCAL_MOCK)
+            _, _, _, audit_logger, _ = get_or_create_components(ExecutionMode.LOCAL_MOCK)
             
             # Create test message
             internal_message = InternalMessage(

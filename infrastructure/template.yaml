@@ -14,12 +14,10 @@ Parameters:
   
   ExecutionMode:
     Type: String
-    Default: LOCAL_MOCK
+    Default: SANDBOX_LIVE
     AllowedValues:
-      - LOCAL_MOCK
-      - DRY_RUN
       - SANDBOX_LIVE
-    Description: OpsAgent execution mode
+    Description: OpsAgent execution mode (sandbox only)
   
   LLMProvider:
     Type: String
@@ -61,25 +59,31 @@ Parameters:
     Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
     Description: Latest Amazon Linux 2 AMI ID
 
-  TeamsBotAppId:
-    Type: String
-    Default: ''
-    Description: Microsoft Teams Bot Application ID from Azure Portal
-
-  AzureTenantId:
-    Type: String
-    Default: ''
-    Description: Azure AD Tenant ID for authentication
-
   AwsAccountId:
     Type: String
     Default: ''
     Description: AWS Account ID for cross-account operations (optional, defaults to current account)
 
+  AmazonQAppId:
+    Type: String
+    Default: ''
+    Description: Amazon Q Business Application ID for hybrid LLM integration (optional)
+
+  AmazonQUserId:
+    Type: String
+    Default: 'opsagent-user'
+    Description: Amazon Q Business User ID for sessions (optional)
+
+  AmazonQSessionId:
+    Type: String
+    Default: ''
+    Description: Amazon Q Business Session ID for conversation continuity (optional)
+
 Conditions:
   EnableEncryption: !Equals [!Ref EnableDynamoDBEncryption, 'true']
   CreateTestResources: !Equals [!Ref CreateTestResources, 'true']
   HasCustomAwsAccountId: !Not [!Equals [!Ref AwsAccountId, '']]
+  HasAmazonQIntegration: !Not [!Equals [!Ref AmazonQAppId, '']]
 
 Globals:
   Function:
@@ -141,6 +145,8 @@ Resources:
           Value: !Ref Environment
         - Key: Owner
           Value: Platform-Team
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
 
   OpsAgentKMSKeyAlias:
     Type: AWS::KMS::Alias
@@ -148,19 +154,23 @@ Resources:
       AliasName: !Sub 'alias/opsagent-${Environment}'
       TargetKeyId: !Ref OpsAgentKMSKey
 
-  # API Gateway
+  # API Gateway with OpenAPI Schema
   OpsAgentApi:
     Type: AWS::Serverless::Api
     Properties:
       StageName: !Ref Environment
+      DefinitionUri: openapi-schema.yaml
+      Variables:
+        LambdaFunctionName: !Ref OpsAgentFunction
       Cors:
         AllowMethods: "'GET,POST,OPTIONS'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
         AllowOrigin: "'*'"
         MaxAge: "'600'"
       Auth:
-        DefaultAuthorizer: AWS_IAM
+        DefaultAuthorizer: NONE  # Using API Key auth defined in OpenAPI
         InvokeRole: NONE
+        ApiKeyRequired: true
       EndpointConfiguration:
         Type: REGIONAL
       TracingEnabled: true
@@ -216,7 +226,40 @@ Resources:
             Path: /health
             Method: GET
             Auth:
-              Authorizer: NONE
+              ApiKeyRequired: false
+        DiagnosticOperations:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpsAgentApi
+            Path: /operations/diagnostic
+            Method: POST
+            Auth:
+              ApiKeyRequired: true
+        ProposeAction:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpsAgentApi
+            Path: /operations/propose
+            Method: POST
+            Auth:
+              ApiKeyRequired: true
+        ApproveAction:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpsAgentApi
+            Path: /operations/approve
+            Method: POST
+            Auth:
+              ApiKeyRequired: true
+        WorkflowOperations:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpsAgentApi
+            Path: /operations/workflow
+            Method: POST
+            Auth:
+              ApiKeyRequired: true
+        # Legacy chat endpoint for backward compatibility
         ChatMessage:
           Type: Api
           Properties:
@@ -224,28 +267,37 @@ Resources:
             Path: /chat
             Method: POST
             Auth:
-              Authorizer: NONE
-        AuthCallback:
-          Type: Api
-          Properties:
-            RestApiId: !Ref OpsAgentApi
-            Path: /auth/callback
-            Method: GET
-            Auth:
-              Authorizer: NONE
+              ApiKeyRequired: true
       Environment:
         Variables:
+          EXECUTION_MODE: !Ref ExecutionMode
+          ENVIRONMENT: !Ref Environment
+          LLM_PROVIDER: !Ref LLMProvider
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
           AUDIT_LOG_GROUP: !Ref AuditLogGroup
           CLOUDWATCH_LOG_GROUP: !Ref AuditLogGroup
           AUDIT_TABLE_NAME: !Ref AuditTable
+          INCIDENT_TABLE_NAME: !Ref IncidentTable
+          NOTIFICATION_TOPIC_ARN: !Ref NotificationTopic
           KMS_KEY_ID: !Ref OpsAgentKMSKey
           API_KEY_PARAMETER: !Ref ApiKeyParameterName
-          TEAMS_BOT_APP_ID: !Ref TeamsBotAppId
-          AZURE_TENANT_ID: !Ref AzureTenantId
+          PLUGIN_API_KEY_PARAMETER: !Ref OpsAgentApiKeyParameter
           AWS_ACCOUNT_ID: !If
             - HasCustomAwsAccountId
             - !Ref AwsAccountId
             - !Ref AWS::AccountId
+          AMAZON_Q_APP_ID: !If
+            - HasAmazonQIntegration
+            - !Ref AmazonQAppId
+            - !Ref AWS::NoValue
+          AMAZON_Q_USER_ID: !If
+            - HasAmazonQIntegration
+            - !Ref AmazonQUserId
+            - !Ref AWS::NoValue
+          AMAZON_Q_SESSION_ID: !If
+            - HasAmazonQIntegration
+            - !Ref AmazonQSessionId
+            - !Ref AWS::NoValue
       Tags:
         Project: OpsAgent
         Environment: !Ref Environment
@@ -265,6 +317,8 @@ Resources:
           Value: !Ref Environment
         - Key: Owner
           Value: Platform-Team
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
 
   # IAM Role for Lambda execution with least privilege permissions
   OpsAgentExecutionRole:
@@ -306,14 +360,23 @@ Resources:
               - !GetAtt AuditLogGroup.Arn
               - !GetAtt ApiGatewayLogGroup.Arn
           
-          # DynamoDB permissions for audit storage
+          # DynamoDB permissions for audit storage and incident records
           - Effect: Allow
             Action:
               - dynamodb:PutItem
               - dynamodb:GetItem
               - dynamodb:Query
               - dynamodb:UpdateItem
-            Resource: !GetAtt AuditTable.Arn
+            Resource: 
+              - !GetAtt AuditTable.Arn
+              - !GetAtt IncidentTable.Arn
+              - !Sub '${IncidentTable.Arn}/index/*'
+          
+          # SNS permissions for notifications
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Resource: !Ref NotificationTopic
           
           # KMS permissions for encryption
           - Effect: Allow
@@ -387,6 +450,8 @@ Resources:
               - logs:DescribeLogGroups
               - logs:DescribeLogStreams
               - logs:FilterLogEvents
+              - cloudtrail:LookupEvents
+              - cloudtrail:DescribeTrails
             Resource: '*'
       Roles:
         - !Ref OpsAgentExecutionRole
@@ -448,6 +513,23 @@ Resources:
               - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0'
               - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-instant-v1'
           
+          # Amazon Q Business permissions for hybrid LLM integration
+          - Effect: Allow
+            Action:
+              - qbusiness:ChatSync
+              - qbusiness:Chat
+              - qbusiness:GetApplication
+              - qbusiness:ListConversations
+            Resource: 
+              - !If
+                - HasAmazonQIntegration
+                - !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${AmazonQAppId}'
+                - !Ref AWS::NoValue
+              - !If
+                - HasAmazonQIntegration
+                - !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${AmazonQAppId}/*'
+                - !Ref AWS::NoValue
+          
           # SSM Parameter Store permissions for API keys and configuration
           - Effect: Allow
             Action:
@@ -505,6 +587,75 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
 
+  # DynamoDB table for incident records
+  IncidentTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'opsagent-incidents-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: incidentId
+          AttributeType: S
+        - AttributeName: severity
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: incidentId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: SeverityCreatedIndex
+          KeySchema:
+            - AttributeName: severity
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: UserIdCreatedIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: !If [EnableEncryption, true, false]
+        SSEType: !If [EnableEncryption, KMS, !Ref 'AWS::NoValue']
+        KMSMasterKeyId: !If [EnableEncryption, !Ref OpsAgentKMSKey, !Ref 'AWS::NoValue']
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+
+  # SNS Topic for notifications
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'opsagent-notifications-${Environment}'
+      DisplayName: 'OpsAgent Notifications'
+      KmsMasterKeyId: !Ref OpsAgentKMSKey
+      Tags:
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+
   # DynamoDB table for audit storage with encryption
   AuditTable:
     Type: AWS::DynamoDB::Table
@@ -536,15 +687,9 @@ Resources:
         AttributeName: ttl
         Enabled: true
       SSESpecification:
-        SSEEnabled: !Ref EnableDynamoDBEncryption
-        SSEType: !If
-          - EnableEncryption
-          - KMS
-          - !Ref AWS::NoValue
-        KMSMasterKeyId: !If
-          - EnableEncryption
-          - !Ref OpsAgentKMSKey
-          - !Ref AWS::NoValue
+        SSEEnabled: !If [EnableEncryption, true, false]
+        SSEType: !If [EnableEncryption, KMS, !Ref 'AWS::NoValue']
+        KMSMasterKeyId: !If [EnableEncryption, !Ref OpsAgentKMSKey, !Ref 'AWS::NoValue']
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       Tags:
@@ -556,6 +701,65 @@ Resources:
           Value: Platform-Team
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
+
+  # API Key for Amazon Q Business Plugin
+  OpsAgentApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: !Sub 'opsagent-plugin-key-${Environment}'
+      Description: 'API Key for Amazon Q Business OpsAgent Plugin'
+      Enabled: true
+      Tags:
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+
+  # Usage Plan for API Key
+  OpsAgentUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: !Sub 'opsagent-usage-plan-${Environment}'
+      Description: 'Usage plan for OpsAgent Plugin API'
+      ApiStages:
+        - ApiId: !Ref OpsAgentApi
+          Stage: !Ref Environment
+      Throttle:
+        RateLimit: 100
+        BurstLimit: 200
+      Quota:
+        Limit: 10000
+        Period: DAY
+      Tags:
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+
+  # Link API Key to Usage Plan
+  OpsAgentUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref OpsAgentApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref OpsAgentUsagePlan
+
+  # Store API Key in SSM Parameter Store
+  OpsAgentApiKeyParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/opsagent/plugin-api-key-${Environment}'
+      Type: SecureString
+      Value: !Ref OpsAgentApiKey
+      Description: 'API Key for Amazon Q Business OpsAgent Plugin'
+      Tags:
+        Project: OpsAgent
+        Environment: !Ref Environment
+        Owner: Platform-Team
 
   # SSM Parameter for API Key (optional)
   ApiKeyParameter:
@@ -570,6 +774,19 @@ Resources:
         Environment: !Ref Environment
         Owner: Platform-Team
 
+  # SSM Parameter for Teams Bot Secret (required for Teams integration)
+  # TeamsBotSecretParameter:
+  #   Type: AWS::SSM::Parameter
+  #   Properties:
+  #     Name: '/opsagent/teams-bot-app-secret'
+  #     Type: String
+  #     Value: 'CHANGE_ME_TO_YOUR_BOT_SECRET'
+  #     Description: 'Microsoft Teams Bot Framework client secret'
+  #     Tags:
+  #       Project: OpsAgent
+  #       Environment: !Ref Environment
+  #       Owner: Platform-Team
+
   # Test EC2 Instance for remediation testing (tagged for OpsAgent management)
   TestInstance:
     Type: AWS::EC2::Instance
@@ -580,6 +797,7 @@ Resources:
       IamInstanceProfile: !Ref TestInstanceProfile
       SecurityGroupIds:
         - !Ref TestSecurityGroup
+      SubnetId: subnet-023cf72072982239e
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
@@ -627,6 +845,7 @@ Resources:
     Condition: CreateTestResources
     Properties:
       GroupDescription: Security group for OpsAgent test instance
+      VpcId: vpc-084537f64f2a1ea5d
       Tags:
         - Key: Name
           Value: !Sub 'opsagent-test-sg-${Environment}'
@@ -667,6 +886,54 @@ Resources:
         - !Ref TestInstanceRole
 
 Outputs:
+  PluginApiEndpointUrl:
+    Description: 'Plugin API endpoint URL for Amazon Q Business'
+    Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-PluginApiUrl'
+
+  DiagnosticEndpointUrl:
+    Description: 'Diagnostic operations endpoint'
+    Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/operations/diagnostic'
+    Export:
+      Name: !Sub '${AWS::StackName}-DiagnosticUrl'
+
+  ProposeActionEndpointUrl:
+    Description: 'Propose action endpoint'
+    Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/operations/propose'
+    Export:
+      Name: !Sub '${AWS::StackName}-ProposeUrl'
+
+  ApproveActionEndpointUrl:
+    Description: 'Approve action endpoint'
+    Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/operations/approve'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApproveUrl'
+
+  WorkflowEndpointUrl:
+    Description: 'Workflow operations endpoint'
+    Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/operations/workflow'
+    Export:
+      Name: !Sub '${AWS::StackName}-WorkflowUrl'
+
+  PluginApiKey:
+    Description: 'API Key for Amazon Q Business Plugin (retrieve from SSM)'
+    Value: !Ref OpsAgentApiKeyParameter
+    Export:
+      Name: !Sub '${AWS::StackName}-PluginApiKeyParam'
+
+  IncidentTableName:
+    Description: 'DynamoDB table for incident records'
+    Value: !Ref IncidentTable
+    Export:
+      Name: !Sub '${AWS::StackName}-IncidentTable'
+
+  NotificationTopicArn:
+    Description: 'SNS topic for notifications'
+    Value: !Ref NotificationTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-NotificationTopic'
+
   ApiGatewayUrl:
     Description: 'API Gateway endpoint URL'
     Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
@@ -743,8 +1010,38 @@ Outputs:
   DeploymentInstructions:
     Description: 'Next steps after deployment'
     Value: !Sub |
-      1. Update API key: aws ssm put-parameter --name "${ApiKeyParameterName}" --value "your-secure-api-key" --type SecureString --overwrite
-      2. Test health endpoint: curl -H "X-API-Key: your-api-key" https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health
-      3. Test chat endpoint: curl -X POST -H "Content-Type: application/json" -H "X-API-Key: your-api-key" -d '{"userId":"test-user","messageText":"Check CPU for test instance","channel":"web"}' https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/chat
-      4. For Teams integration, configure bot endpoint to: https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/chat
-      5. Execution mode: ${ExecutionMode} (change via parameter for different modes)
+      ## OpsAgent Controller Deployment Complete
+      
+      ### 1. API Configuration
+      - Update API key: aws ssm put-parameter --name "${ApiKeyParameterName}" --value "your-secure-api-key" --type SecureString --overwrite
+      - Plugin API Key: aws ssm get-parameter --name "${OpsAgentApiKeyParameter}" --with-decryption --query 'Parameter.Value' --output text
+      
+      ### 2. Amazon Q Business Plugin Setup
+      - Plugin API Endpoint: https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+      - OpenAPI Schema: Use infrastructure/openapi-schema.yaml
+      - API Key: Retrieve from SSM parameter ${OpsAgentApiKeyParameter}
+      
+      ### 3. Test Endpoints
+      - Health: curl https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health
+      - Diagnostic: curl -X POST -H "Content-Type: application/json" -H "X-API-Key: YOUR_KEY" -d '{"operation":"get_ec2_status","parameters":{"instance_id":"i-123"},"user_context":{"user_id":"test@company.com"}}' https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/operations/diagnostic
+      
+      ### 4. Configuration
+      - Execution mode: ${ExecutionMode}
+      - Environment: ${Environment}
+      - Amazon Q Integration: ${AmazonQAppId}
+      
+      ### 5. Resources Created
+      - Audit Table: ${AuditTable}
+      - Incident Table: ${IncidentTable}
+      - Notification Topic: ${NotificationTopic}
+      - KMS Key: ${OpsAgentKMSKey}
+
+  AmazonQConfiguration:
+    Condition: HasAmazonQIntegration
+    Description: 'Amazon Q Business integration configuration'
+    Value: !Sub |
+      Amazon Q Business Application ID: ${AmazonQAppId}
+      Amazon Q Business User ID: ${AmazonQUserId}
+      Amazon Q Business Session ID: ${AmazonQSessionId}
+      Hybrid Mode: Enabled (Amazon Q Business + Bedrock fallback)
+      Intent Routing: Operational tasks → OpsAgent, Knowledge queries → Amazon Q Business

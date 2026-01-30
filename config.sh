@@ -6,9 +6,9 @@
 if [ -f ".env" ]; then
     echo "Loading configuration from .env file..."
     export $(cat .env | grep -v '^#' | grep -v '^\s*$' | xargs)
-    echo "✅ Configuration loaded"
+    echo "Configuration loaded"
 else
-    echo "⚠️  No .env file found. Using default/environment values."
+    echo "WARNING: No .env file found. Using default/environment values."
     echo "   Copy .env.example to .env and configure your values."
 fi
 
@@ -34,7 +34,7 @@ done
 
 if [ -n "$MISSING_VARS" ]; then
     echo ""
-    echo "❌ ERROR: Missing required environment variables:"
+    echo "ERROR: Missing required environment variables:"
     for var in $MISSING_VARS; do
         echo "   - $var"
     done

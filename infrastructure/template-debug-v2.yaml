@@ -23,6 +23,11 @@ Parameters:
     Type: String
     Default: ''
 
+  TeamsBotAppPassword:
+    Type: String
+    Default: ''
+    NoEcho: true
+
 Conditions:
   HasCustomAwsAccountId: !Not [!Equals [!Ref AwsAccountId, '']]
 
@@ -66,6 +71,7 @@ Resources:
       Environment:
         Variables:
           TEAMS_BOT_APP_ID: !Ref TeamsBotAppId
+          TEAMS_BOT_APP_PASSWORD: !Ref TeamsBotAppPassword
           AZURE_TENANT_ID: !Ref AzureTenantId
           AWS_ACCOUNT_ID: !If [HasCustomAwsAccountId, !Ref AwsAccountId, !Ref 'AWS::AccountId']
           EXECUTION_MODE: !Ref ExecutionMode
