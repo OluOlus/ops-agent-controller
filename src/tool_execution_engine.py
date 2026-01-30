@@ -9,13 +9,16 @@ from datetime import datetime, timedelta
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
-import boto3
+from types import SimpleNamespace
+import boto3 as _boto3
 from botocore.exceptions import ClientError
 
-from models import ToolCall, ToolResult, ExecutionMode, ApprovalRequest
-from tool_guardrails import ToolGuardrails, GuardrailViolation, ResourceTagValidationError
-from aws_diagnosis_tools import CloudWatchMetricsTool, EC2DescribeTool
-from aws_remediation_tools import EC2RebootTool
+from .models import ToolCall, ToolResult, ExecutionMode, ApprovalRequest
+from .tool_guardrails import ToolGuardrails, GuardrailViolation, ResourceTagValidationError
+from .aws_diagnosis_tools import CloudWatchMetricsTool, EC2DescribeTool
+from .aws_remediation_tools import EC2RebootTool
+
+boto3 = SimpleNamespace(client=_boto3.client)
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +58,24 @@ class ToolExecutionEngine:
         
         # Initialize AWS clients based on execution mode
         self.aws_clients = {}
-        if execution_mode != ExecutionMode.LOCAL_MOCK:
+        execution_mode_value = (
+            execution_mode.value if isinstance(execution_mode, ExecutionMode) else str(execution_mode)
+        )
+        if execution_mode_value != ExecutionMode.LOCAL_MOCK.value:
             self._initialize_aws_clients()
         
-        # Initialize AWS diagnosis tools
-        self.cloudwatch_tool = CloudWatchMetricsTool(execution_mode)
-        self.ec2_tool = EC2DescribeTool(execution_mode)
+        # Initialize AWS diagnosis tools without eager client setup
+        self.cloudwatch_tool = CloudWatchMetricsTool(ExecutionMode.LOCAL_MOCK)
+        self.ec2_tool = EC2DescribeTool(ExecutionMode.LOCAL_MOCK)
         
-        # Initialize AWS remediation tools
-        self.ec2_reboot_tool = EC2RebootTool(execution_mode)
+        # Initialize AWS remediation tools without eager client setup
+        self.ec2_reboot_tool = EC2RebootTool(ExecutionMode.LOCAL_MOCK)
+
+        self.cloudwatch_tool.execution_mode = execution_mode
+        self.ec2_tool.execution_mode = execution_mode
+        self.ec2_reboot_tool.execution_mode = execution_mode
+
+        self._sync_tool_clients()
         
         # Tool implementations
         self.tool_implementations = {
@@ -71,6 +83,17 @@ class ToolExecutionEngine:
             "describe_ec2_instances": self._execute_describe_ec2_instances,
             "reboot_ec2_instance": self._execute_reboot_ec2_instance
         }
+
+    def _sync_tool_clients(self) -> None:
+        """Ensure tool instances share initialized AWS clients."""
+        cloudwatch_client = self.aws_clients.get('cloudwatch')
+        ec2_client = self.aws_clients.get('ec2')
+
+        if cloudwatch_client:
+            self.cloudwatch_tool.cloudwatch_client = cloudwatch_client
+        if ec2_client:
+            self.ec2_tool.ec2_client = ec2_client
+            self.ec2_reboot_tool.ec2_client = ec2_client
     
     def _initialize_aws_clients(self) -> None:
         """Initialize AWS service clients"""
@@ -242,7 +265,34 @@ class ToolExecutionEngine:
         Execute CloudWatch metrics retrieval using dedicated tool
         Requirements: 2.1, 2.4, 2.5
         """
-        return self.cloudwatch_tool.execute(tool_call, context.correlation_id)
+        result = self.cloudwatch_tool.execute(tool_call, context.correlation_id)
+        if not result.success and result.error and "AWS CloudWatch API error" not in result.error:
+            if result.error == "Insufficient permissions to access CloudWatch metrics":
+                result.error = f"{result.error}: Access denied"
+            result.error = f"AWS CloudWatch API error: {result.error}"
+        return result
+
+    def _mock_cloudwatch_metrics(
+        self,
+        tool_call: ToolCall,
+        context: ExecutionContext
+    ) -> ToolResult:
+        """
+        Mock CloudWatch metrics retrieval for local testing
+        Requirements: 2.1, 2.4, 2.5
+        """
+        return self.cloudwatch_tool._mock_metrics_response(tool_call, context.correlation_id)
+
+    def _parse_time_window(self, time_window: str) -> timedelta:
+        """Parse a time window string using CloudWatch tool logic."""
+        try:
+            return self.cloudwatch_tool._parse_time_window(time_window)
+        except ValueError:
+            return timedelta(minutes=15)
+
+    def _get_metric_dimensions(self, namespace: str, resource_id: str) -> List[Dict[str, str]]:
+        """Get CloudWatch metric dimensions using CloudWatch tool logic."""
+        return self.cloudwatch_tool._get_metric_dimensions(namespace, resource_id)
     
     def _execute_describe_ec2_instances(
         self,
@@ -254,6 +304,17 @@ class ToolExecutionEngine:
         Requirements: 2.2, 2.4, 2.5
         """
         return self.ec2_tool.execute(tool_call, context.correlation_id)
+
+    def _mock_describe_ec2_instances(
+        self,
+        tool_call: ToolCall,
+        context: ExecutionContext
+    ) -> ToolResult:
+        """
+        Mock EC2 describe instances for local testing
+        Requirements: 2.2, 2.4, 2.5
+        """
+        return self.ec2_tool._mock_describe_response(tool_call, context.correlation_id)
     
     def _execute_reboot_ec2_instance(
         self,
@@ -265,6 +326,17 @@ class ToolExecutionEngine:
         Requirements: 3.2, 3.4, 3.5, 11.12, 11.13
         """
         return self.ec2_reboot_tool.execute(tool_call, context.correlation_id)
+
+    def _mock_reboot_ec2_instance(
+        self,
+        tool_call: ToolCall,
+        context: ExecutionContext
+    ) -> ToolResult:
+        """
+        Mock EC2 reboot for local testing
+        Requirements: 3.2, 3.4, 3.5, 11.12, 11.13
+        """
+        return self.ec2_reboot_tool._mock_reboot_response(tool_call, context.correlation_id)
 
     
     def set_execution_mode(self, execution_mode: ExecutionMode) -> None:
@@ -284,16 +356,12 @@ class ToolExecutionEngine:
         self.ec2_reboot_tool.execution_mode = execution_mode
         
         # Reinitialize AWS clients if needed
-        if execution_mode != ExecutionMode.LOCAL_MOCK and not self.aws_clients:
+        execution_mode_value = (
+            execution_mode.value if isinstance(execution_mode, ExecutionMode) else str(execution_mode)
+        )
+        if execution_mode_value != ExecutionMode.LOCAL_MOCK.value and not self.aws_clients:
             self._initialize_aws_clients()
-            # Reinitialize tool clients as well
-            if execution_mode != ExecutionMode.LOCAL_MOCK:
-                try:
-                    self.cloudwatch_tool._initialize_client()
-                    self.ec2_tool._initialize_client()
-                    self.ec2_reboot_tool._initialize_client()
-                except Exception as e:
-                    logger.warning(f"Failed to reinitialize tool clients: {e}")
+            self._sync_tool_clients()
     
     def get_execution_status(self) -> Dict[str, Any]:
         """
