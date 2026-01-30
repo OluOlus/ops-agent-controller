@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import json
 import logging
 
-from models import ToolCall, ApprovalRequest, ExecutionMode, generate_correlation_id
+from .models import ToolCall, ApprovalRequest, ExecutionMode, generate_correlation_id
 
 logger = logging.getLogger(__name__)
 

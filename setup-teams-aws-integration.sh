@@ -240,7 +240,8 @@ cat > teams-app-manifest-aws.json << EOF
   "validDomains": [
     "xt3qtho8l6.execute-api.eu-west-2.amazonaws.com",
     "signin.aws.amazon.com",
-    "token.botframework.com"
+    "token.botframework.com",
+    "login.microsoftonline.com"
   ],
   "webApplicationInfo": {
     "id": "$BOT_APP_ID",

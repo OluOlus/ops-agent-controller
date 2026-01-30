@@ -37,7 +37,20 @@ class TeamsAuthHandler:
         """Initialize the Teams auth handler"""
         self.bot_app_id = os.environ.get("TEAMS_BOT_APP_ID", "7245659a-25f0-455c-9a75-06451e81fc3e")
         self.tenant_id = os.environ.get("AZURE_TENANT_ID", "78952f68-6959-4fc9-a579-af36c10eee5c")
+        self.tenant_ids = [
+            tenant.strip()
+            for tenant in os.environ.get("AZURE_TENANT_IDS", self.tenant_id).split(",")
+            if tenant.strip()
+        ]
         self.aws_account_id = os.environ.get("AWS_ACCOUNT_ID", "612176863084")
+        self.aws_account_ids = [
+            account.strip()
+            for account in os.environ.get("AWS_ACCOUNT_IDS", self.aws_account_id).split(",")
+            if account.strip()
+        ]
+        self.aws_role_name = os.environ.get("AWS_ROLE_NAME", "OpsAgent-Teams-User-Role")
+        self.aws_role_arn = os.environ.get("AWS_ROLE_ARN")
+        self.aws_role_arn_by_tenant = self._load_role_arn_map()
         self.aws_region = os.environ.get("AWS_REGION", "eu-west-2")
         
         # In-memory session store (use Redis/DynamoDB in production)
@@ -93,84 +106,17 @@ class TeamsAuthHandler:
             "type": "message",
             "attachments": [
                 {
-                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "contentType": "application/vnd.microsoft.card.signin",
                     "content": {
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "type": "AdaptiveCard",
-                        "version": "1.3",
-                        "body": [
+                        "text": (
+                            "🔐 AWS Authentication Required\n\n"
+                            "Sign in with your organization to access AWS resources."
+                        ),
+                        "buttons": [
                             {
-                                "type": "TextBlock",
-                                "text": "🔐 AWS Authentication Required",
-                                "weight": "Bolder",
-                                "size": "Large",
-                                "color": "Attention"
-                            },
-                            {
-                                "type": "TextBlock",
-                                "text": "To access AWS resources, you need to authenticate with your organizational credentials.",
-                                "wrap": True,
-                                "spacing": "Medium"
-                            },
-                            {
-                                "type": "ColumnSet",
-                                "columns": [
-                                    {
-                                        "type": "Column",
-                                        "width": "auto",
-                                        "items": [
-                                            {
-                                                "type": "Image",
-                                                "url": "https://upload.wikimedia.org/wikipedia/commons/9/93/Amazon_Web_Services_Logo.svg",
-                                                "size": "Small"
-                                            }
-                                        ]
-                                    },
-                                    {
-                                        "type": "Column",
-                                        "width": "stretch",
-                                        "items": [
-                                            {
-                                                "type": "TextBlock",
-                                                "text": "**What you'll get access to:**",
-                                                "weight": "Bolder"
-                                            },
-                                            {
-                                                "type": "TextBlock",
-                                                "text": "• EC2 instance monitoring and management\n• CloudWatch metrics and logs\n• Secure operations with approval workflows\n• Full audit trail of all actions",
-                                                "wrap": True
-                                            }
-                                        ]
-                                    }
-                                ]
-                            },
-                            {
-                                "type": "TextBlock",
-                                "text": "**Security Features:**",
-                                "weight": "Bolder",
-                                "spacing": "Medium"
-                            },
-                            {
-                                "type": "TextBlock",
-                                "text": "✅ Single Sign-On with your organization\n✅ Least privilege AWS access\n✅ Session timeout and automatic logout\n✅ All actions logged and audited",
-                                "wrap": True
-                            }
-                        ],
-                        "actions": [
-                            {
-                                "type": "Action.OpenUrl",
-                                "title": "🔑 Sign in with Azure AD",
-                                "url": auth_url,
-                                "style": "positive"
-                            },
-                            {
-                                "type": "Action.Submit",
-                                "title": "❌ Cancel",
-                                "data": {
-                                    "action": "cancel_auth",
-                                    "user_id": teams_user_id
-                                },
-                                "style": "destructive"
+                                "type": "signin",
+                                "title": "🔑 Sign in with your organization",
+                                "value": auth_url
                             }
                         ]
                     }
@@ -287,7 +233,7 @@ class TeamsAuthHandler:
         """Validate user belongs to authorized organization"""
         # Check if user's tenant matches expected tenant
         user_tenant = user_info.get('tenantId', '')
-        if user_tenant != self.tenant_id:
+        if user_tenant not in self.tenant_ids:
             logger.warning(f"User from unauthorized tenant: {user_tenant}")
             return False
         
@@ -302,7 +248,7 @@ class TeamsAuthHandler:
             # Assume role using OIDC token
             sts = boto3.client('sts', region_name=self.aws_region)
             
-            role_arn = f"arn:aws:iam::{self.aws_account_id}:role/OpsAgent-Teams-User-Role"
+            role_arn = self._resolve_role_arn(user_info)
             session_name = f"teams-{user_info.get('userPrincipalName', 'unknown')}"
             
             response = sts.assume_role_with_web_identity(
@@ -324,6 +270,30 @@ class TeamsAuthHandler:
         except Exception as e:
             logger.error(f"AWS credentials error: {e}")
             return None
+
+    def _load_role_arn_map(self) -> Dict[str, str]:
+        """Load tenant-to-role ARN mapping from environment."""
+        raw_map = os.environ.get("AWS_ROLE_ARN_BY_TENANT")
+        if not raw_map:
+            return {}
+        try:
+            return json.loads(raw_map)
+        except json.JSONDecodeError as exc:
+            logger.warning(f"Invalid AWS_ROLE_ARN_BY_TENANT JSON: {exc}")
+            return {}
+
+    def _resolve_role_arn(self, user_info: Dict[str, Any]) -> str:
+        """Resolve the role ARN for the authenticated user."""
+        user_tenant = user_info.get('tenantId', '')
+
+        if user_tenant in self.aws_role_arn_by_tenant:
+            return self.aws_role_arn_by_tenant[user_tenant]
+
+        if self.aws_role_arn:
+            return self.aws_role_arn
+
+        account_id = self.aws_account_ids[0] if self.aws_account_ids else self.aws_account_id
+        return f"arn:aws:iam::{account_id}:role/{self.aws_role_name}"
     
     def create_success_card(self, user: TeamsUser) -> Dict[str, Any]:
         """Create success card after authentication"""
