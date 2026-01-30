@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
-from .models import ToolCall, ExecutionMode
+from models import ToolCall, ExecutionMode
 
 logger = logging.getLogger(__name__)
 

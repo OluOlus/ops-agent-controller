@@ -14,7 +14,7 @@ from dataclasses import dataclass, asdict
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
-from .models import InternalMessage, ToolCall, ToolResult, ApprovalRequest, ExecutionMode
+from models import InternalMessage, ToolCall, ToolResult, ApprovalRequest, ExecutionMode
 
 
 logger = logging.getLogger(__name__)

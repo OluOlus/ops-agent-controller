@@ -1,0 +1,209 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'OpsAgent Controller - Fixed Version with Working IAM'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: sandbox
+    AllowedValues:
+      - sandbox
+      - staging
+      - production
+    Description: Deployment environment
+
+  ExecutionMode:
+    Type: String
+    Default: LOCAL_MOCK
+    AllowedValues:
+      - LOCAL_MOCK
+      - DRY_RUN
+      - SANDBOX_LIVE
+    Description: OpsAgent execution mode
+
+  LLMProvider:
+    Type: String
+    Default: bedrock
+    AllowedValues:
+      - bedrock
+      - openai
+      - azure_openai
+    Description: LLM provider to use
+
+  BedrockModelId:
+    Type: String
+    Default: anthropic.claude-3-sonnet-20240229-v1:0
+    Description: Bedrock model ID for LLM provider
+
+  TeamsBotAppId:
+    Type: String
+    Default: ''
+    Description: Microsoft Teams Bot Application ID from Azure Portal
+
+  AzureTenantId:
+    Type: String
+    Default: ''
+    Description: Azure AD Tenant ID for authentication
+
+  AwsAccountId:
+    Type: String
+    Default: ''
+    Description: AWS Account ID for cross-account operations (optional, defaults to current account)
+
+Conditions:
+  HasCustomAwsAccountId: !Not [!Equals [!Ref AwsAccountId, '']]
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.11
+    Environment:
+      Variables:
+        EXECUTION_MODE: !Ref ExecutionMode
+        ENVIRONMENT: !Ref Environment
+        LLM_PROVIDER: !Ref LLMProvider
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+    Tags:
+      Project: OpsAgent
+      Environment: !Ref Environment
+      Owner: Platform-Team
+
+Resources:
+  # API Gateway
+  OpsAgentApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Environment
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+        MaxAge: "'600'"
+      Auth:
+        DefaultAuthorizer: NONE
+      EndpointConfiguration:
+        Type: REGIONAL
+      TracingEnabled: true
+      Tags:
+        Project: OpsAgent
+        Environment: !Ref Environment
+        Owner: Platform-Team
+
+  # Lambda Function with SAM Policy Templates
+  OpsAgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'opsagent-controller-${Environment}'
+      CodeUri: ../src/
+      Handler: main.lambda_handler
+      Description: 'OpsAgent Controller - Main Lambda function'
+      Policies:
+        # Basic CloudWatch access
+        - CloudWatchPutMetricPolicy: {}
+        - CloudWatchLambdaInsightsExecutionRolePolicy
+        # EC2 read-only access
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ec2:DescribeInstances
+                - ec2:DescribeInstanceStatus
+                - ec2:DescribeTags
+              Resource: '*'
+        # CloudWatch metrics read access
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cloudwatch:GetMetricStatistics
+                - cloudwatch:GetMetricData
+                - cloudwatch:ListMetrics
+                - cloudwatch:DescribeAlarms
+              Resource: '*'
+        # Bedrock access
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0'
+                - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0'
+        # STS for identity
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sts:GetCallerIdentity
+              Resource: '*'
+        # EC2 remediation (restricted to tagged resources)
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ec2:RebootInstances
+                - ec2:StartInstances
+                - ec2:StopInstances
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  'ec2:ResourceTag/OpsAgentManaged': 'true'
+      Events:
+        HealthCheck:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpsAgentApi
+            Path: /health
+            Method: GET
+        ChatMessage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpsAgentApi
+            Path: /chat
+            Method: POST
+        AuthCallback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref OpsAgentApi
+            Path: /auth/callback
+            Method: GET
+      Environment:
+        Variables:
+          TEAMS_BOT_APP_ID: !Ref TeamsBotAppId
+          AZURE_TENANT_ID: !Ref AzureTenantId
+          AWS_ACCOUNT_ID: !If
+            - HasCustomAwsAccountId
+            - !Ref AwsAccountId
+            - !Ref AWS::AccountId
+      Tags:
+        Project: OpsAgent
+        Environment: !Ref Environment
+        Owner: Platform-Team
+
+Outputs:
+  ApiGatewayUrl:
+    Description: 'API Gateway endpoint URL'
+    Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrl'
+
+  HealthEndpointUrl:
+    Description: 'Health check endpoint'
+    Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health'
+    Export:
+      Name: !Sub '${AWS::StackName}-HealthUrl'
+
+  ChatEndpointUrl:
+    Description: 'Chat endpoint for sending messages'
+    Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/chat'
+    Export:
+      Name: !Sub '${AWS::StackName}-ChatUrl'
+
+  LambdaFunctionArn:
+    Description: 'Lambda function ARN'
+    Value: !GetAtt OpsAgentFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaArn'
+
+  LambdaFunctionName:
+    Description: 'Lambda function name'
+    Value: !Ref OpsAgentFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaName'

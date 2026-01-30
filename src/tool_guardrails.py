@@ -20,7 +20,7 @@ except ImportError:
 import boto3
 from botocore.exceptions import ClientError
 
-from .models import ToolCall, ExecutionMode
+from models import ToolCall, ExecutionMode
 
 logger = logging.getLogger(__name__)
 

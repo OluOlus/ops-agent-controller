@@ -15,7 +15,7 @@ capabilities = "CAPABILITY_NAMED_IAM"
 confirm_changeset = true
 resolve_s3 = true
 s3_prefix = "opsagent-controller"
-region = "us-east-1"
+region = "eu-west-2"
 image_repositories = []
 
 [sandbox]
