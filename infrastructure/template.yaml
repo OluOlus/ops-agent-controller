@@ -162,15 +162,6 @@ Resources:
       DefinitionUri: openapi-schema.yaml
       Variables:
         LambdaFunctionName: !Ref OpsAgentFunction
-      Cors:
-        AllowMethods: "'GET,POST,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-        AllowOrigin: "'*'"
-        MaxAge: "'600'"
-      Auth:
-        DefaultAuthorizer: NONE  # Using API Key auth defined in OpenAPI
-        InvokeRole: NONE
-        ApiKeyRequired: true
       EndpointConfiguration:
         Type: REGIONAL
       TracingEnabled: true

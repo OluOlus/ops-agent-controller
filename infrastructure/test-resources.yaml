@@ -1,0 +1,281 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Test resources for OpsAgent Controller live testing'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: test
+    Description: Environment name
+  
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: EC2 instance type for testing
+
+Resources:
+  # VPC for test resources
+  TestVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'opsagent-test-vpc-${Environment}'
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: OpsAgentManaged
+          Value: 'true'
+
+  # Internet Gateway
+  TestIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub 'opsagent-test-igw-${Environment}'
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref TestVPC
+      InternetGatewayId: !Ref TestIGW
+
+  # Public Subnet
+  TestSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref TestVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'opsagent-test-subnet-${Environment}'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Route Table
+  TestRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref TestVPC
+      Tags:
+        - Key: Name
+          Value: !Sub 'opsagent-test-rt-${Environment}'
+
+  TestRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref TestRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref TestIGW
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref TestSubnet
+      RouteTableId: !Ref TestRouteTable
+
+  # Security Group
+  TestSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for OpsAgent test instances
+      VpcId: !Ref TestVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub 'opsagent-test-sg-${Environment}'
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: OpsAgentManaged
+          Value: 'true'
+
+  # Test EC2 Instance 1
+  TestInstance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-00d8a0260a086a99e  # Amazon Linux 2 AMI (us-west-2)
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref TestSubnet
+      SecurityGroupIds:
+        - !Ref TestSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+          echo "<h1>OpsAgent Test Instance 1</h1>" > /var/www/html/index.html
+      Tags:
+        - Key: Name
+          Value: !Sub 'opsagent-test-instance-1-${Environment}'
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: OpsAgentManaged
+          Value: 'true'
+        - Key: TestInstance
+          Value: 'true'
+
+  # Test EC2 Instance 2
+  TestInstance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-00d8a0260a086a99e  # Amazon Linux 2 AMI (us-west-2)
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref TestSubnet
+      SecurityGroupIds:
+        - !Ref TestSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+          echo "<h1>OpsAgent Test Instance 2</h1>" > /var/www/html/index.html
+      Tags:
+        - Key: Name
+          Value: !Sub 'opsagent-test-instance-2-${Environment}'
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: OpsAgentManaged
+          Value: 'true'
+        - Key: TestInstance
+          Value: 'true'
+
+  # ECS Cluster for testing
+  TestECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub 'opsagent-test-cluster-${Environment}'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: OpsAgentManaged
+          Value: 'true'
+
+  # ECS Task Definition
+  TestTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub 'opsagent-test-task-${Environment}'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 256
+      Memory: 512
+      ExecutionRoleArn: !Ref ECSExecutionRole
+      ContainerDefinitions:
+        - Name: test-container
+          Image: nginx:latest
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: OpsAgentManaged
+          Value: 'true'
+
+  # ECS Service
+  TestECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub 'opsagent-test-service-${Environment}'
+      Cluster: !Ref TestECSCluster
+      TaskDefinition: !Ref TestTaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 2
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref TestSecurityGroup
+          Subnets:
+            - !Ref TestSubnet
+          AssignPublicIp: ENABLED
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: OpsAgentManaged
+          Value: 'true'
+
+  # ECS Execution Role
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # CloudWatch Log Group for ECS
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/opsagent-test-${Environment}'
+      RetentionInDays: 7
+
+Outputs:
+  TestInstance1Id:
+    Description: Test Instance 1 ID
+    Value: !Ref TestInstance1
+    Export:
+      Name: !Sub '${AWS::StackName}-TestInstance1Id'
+
+  TestInstance2Id:
+    Description: Test Instance 2 ID
+    Value: !Ref TestInstance2
+    Export:
+      Name: !Sub '${AWS::StackName}-TestInstance2Id'
+
+  TestClusterName:
+    Description: Test ECS Cluster Name
+    Value: !Ref TestECSCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-TestClusterName'
+
+  TestServiceName:
+    Description: Test ECS Service Name
+    Value: !Ref TestECSService
+    Export:
+      Name: !Sub '${AWS::StackName}-TestServiceName'
+
+  VPCId:
+    Description: Test VPC ID
+    Value: !Ref TestVPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCId'
+
+  SubnetId:
+    Description: Test Subnet ID
+    Value: !Ref TestSubnet
+    Export:
+      Name: !Sub '${AWS::StackName}-SubnetId'

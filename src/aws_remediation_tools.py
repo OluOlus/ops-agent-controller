@@ -8,7 +8,7 @@ from datetime import datetime
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
-from src.models import ToolCall, ToolResult, ExecutionMode
+from models import ToolCall, ToolResult, ExecutionMode
 
 logger = logging.getLogger(__name__)
 

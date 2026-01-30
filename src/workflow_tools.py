@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 import boto3
 from botocore.exceptions import ClientError
 
-from src.models import ToolCall, ToolResult, ExecutionMode
+from models import ToolCall, ToolResult, ExecutionMode
 
 logger = logging.getLogger(__name__)
 
