@@ -93,84 +93,17 @@ class TeamsAuthHandler:
             "type": "message",
             "attachments": [
                 {
-                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "contentType": "application/vnd.microsoft.card.signin",
                     "content": {
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "type": "AdaptiveCard",
-                        "version": "1.3",
-                        "body": [
+                        "text": (
+                            "🔐 AWS Authentication Required\n\n"
+                            "Sign in with your organization to access AWS resources."
+                        ),
+                        "buttons": [
                             {
-                                "type": "TextBlock",
-                                "text": "🔐 AWS Authentication Required",
-                                "weight": "Bolder",
-                                "size": "Large",
-                                "color": "Attention"
-                            },
-                            {
-                                "type": "TextBlock",
-                                "text": "To access AWS resources, you need to authenticate with your organizational credentials.",
-                                "wrap": True,
-                                "spacing": "Medium"
-                            },
-                            {
-                                "type": "ColumnSet",
-                                "columns": [
-                                    {
-                                        "type": "Column",
-                                        "width": "auto",
-                                        "items": [
-                                            {
-                                                "type": "Image",
-                                                "url": "https://upload.wikimedia.org/wikipedia/commons/9/93/Amazon_Web_Services_Logo.svg",
-                                                "size": "Small"
-                                            }
-                                        ]
-                                    },
-                                    {
-                                        "type": "Column",
-                                        "width": "stretch",
-                                        "items": [
-                                            {
-                                                "type": "TextBlock",
-                                                "text": "**What you'll get access to:**",
-                                                "weight": "Bolder"
-                                            },
-                                            {
-                                                "type": "TextBlock",
-                                                "text": "• EC2 instance monitoring and management\n• CloudWatch metrics and logs\n• Secure operations with approval workflows\n• Full audit trail of all actions",
-                                                "wrap": True
-                                            }
-                                        ]
-                                    }
-                                ]
-                            },
-                            {
-                                "type": "TextBlock",
-                                "text": "**Security Features:**",
-                                "weight": "Bolder",
-                                "spacing": "Medium"
-                            },
-                            {
-                                "type": "TextBlock",
-                                "text": "✅ Single Sign-On with your organization\n✅ Least privilege AWS access\n✅ Session timeout and automatic logout\n✅ All actions logged and audited",
-                                "wrap": True
-                            }
-                        ],
-                        "actions": [
-                            {
-                                "type": "Action.OpenUrl",
-                                "title": "🔑 Sign in with Azure AD",
-                                "url": auth_url,
-                                "style": "positive"
-                            },
-                            {
-                                "type": "Action.Submit",
-                                "title": "❌ Cancel",
-                                "data": {
-                                    "action": "cancel_auth",
-                                    "user_id": teams_user_id
-                                },
-                                "style": "destructive"
+                                "type": "signin",
+                                "title": "🔑 Sign in with your organization",
+                                "value": auth_url
                             }
                         ]
                     }
