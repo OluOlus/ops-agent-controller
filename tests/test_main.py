@@ -21,19 +21,19 @@ class TestExecutionMode:
         """Test default execution mode when not set"""
         with patch.dict(os.environ, {}, clear=True):
             mode = get_execution_mode()
-            assert mode == "LOCAL_MOCK"
+            assert mode == "SANDBOX_LIVE"
     
     def test_valid_execution_mode(self):
         """Test valid execution mode from environment"""
-        with patch.dict(os.environ, {"EXECUTION_MODE": "DRY_RUN"}):
+        with patch.dict(os.environ, {"EXECUTION_MODE": "SANDBOX_LIVE"}):
             mode = get_execution_mode()
-            assert mode == "DRY_RUN"
+            assert mode == "SANDBOX_LIVE"
     
     def test_invalid_execution_mode_defaults(self):
-        """Test invalid execution mode defaults to LOCAL_MOCK"""
+        """Test invalid execution mode defaults to SANDBOX_LIVE"""
         with patch.dict(os.environ, {"EXECUTION_MODE": "INVALID_MODE"}):
             mode = get_execution_mode()
-            assert mode == "LOCAL_MOCK"
+            assert mode == "SANDBOX_LIVE"
 
 
 class TestSystemStatus:

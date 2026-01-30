@@ -13,10 +13,11 @@ from types import SimpleNamespace
 import boto3 as _boto3
 from botocore.exceptions import ClientError
 
-from models import ToolCall, ToolResult, ExecutionMode, ApprovalRequest
-from tool_guardrails import ToolGuardrails, GuardrailViolation, ResourceTagValidationError
-from aws_diagnosis_tools import CloudWatchMetricsTool, EC2DescribeTool
-from aws_remediation_tools import EC2RebootTool
+from src.models import ToolCall, ToolResult, ExecutionMode, ApprovalRequest
+from src.tool_guardrails import ToolGuardrails, GuardrailViolation, ResourceTagValidationError
+from src.aws_diagnosis_tools import CloudWatchMetricsTool, EC2DescribeTool, EC2StatusTool, ALBTargetHealthTool, CloudTrailSearchTool
+from src.aws_remediation_tools import EC2RebootTool, ECSScalingTool
+from src.workflow_tools import IncidentRecordTool, ChannelNotificationTool
 
 boto3 = SimpleNamespace(client=_boto3.client)
 
@@ -67,43 +68,123 @@ class ToolExecutionEngine:
         # Initialize AWS diagnosis tools without eager client setup
         self.cloudwatch_tool = CloudWatchMetricsTool(ExecutionMode.LOCAL_MOCK)
         self.ec2_tool = EC2DescribeTool(ExecutionMode.LOCAL_MOCK)
+        self.ec2_status_tool = EC2StatusTool(ExecutionMode.LOCAL_MOCK)  # New dedicated tool for get_ec2_status
+        self.alb_tool = ALBTargetHealthTool(ExecutionMode.SANDBOX_LIVE)
+        self.cloudtrail_tool = CloudTrailSearchTool(ExecutionMode.LOCAL_MOCK)
         
         # Initialize AWS remediation tools without eager client setup
         self.ec2_reboot_tool = EC2RebootTool(ExecutionMode.LOCAL_MOCK)
+        self.ecs_scaling_tool = ECSScalingTool(ExecutionMode.LOCAL_MOCK)
+        
+        # Initialize workflow tools
+        self.incident_tool = IncidentRecordTool(ExecutionMode.LOCAL_MOCK)
+        self.channel_tool = ChannelNotificationTool(ExecutionMode.LOCAL_MOCK)
 
         self.cloudwatch_tool.execution_mode = execution_mode
         self.ec2_tool.execution_mode = execution_mode
+        self.ec2_status_tool.execution_mode = execution_mode  # Update execution mode for EC2 status tool
+        self.alb_tool.execution_mode = execution_mode
+        self.cloudtrail_tool.execution_mode = execution_mode
         self.ec2_reboot_tool.execution_mode = execution_mode
+        self.ecs_scaling_tool.execution_mode = execution_mode
+        self.incident_tool.execution_mode = execution_mode
+        self.channel_tool.execution_mode = execution_mode
 
         self._sync_tool_clients()
         
         # Tool implementations
         self.tool_implementations = {
+            # Diagnostic operations (no approval required)
             "get_cloudwatch_metrics": self._execute_cloudwatch_metrics,
+            "get_ec2_status": self._execute_get_ec2_status,
             "describe_ec2_instances": self._execute_describe_ec2_instances,
-            "reboot_ec2_instance": self._execute_reboot_ec2_instance
+            "describe_alb_target_health": self._execute_alb_target_health,
+            "search_cloudtrail_events": self._execute_cloudtrail_search,
+            
+            # Write operations (approval required)
+            "reboot_ec2_instance": self._execute_reboot_ec2_instance,
+            "reboot_ec2": self._execute_reboot_ec2_instance,  # Alias for consistency
+            "scale_ecs_service": self._execute_scale_ecs_service,
+            
+            # Workflow operations (no approval, fully audited)
+            "create_incident_record": self._execute_create_incident,
+            "post_summary_to_channel": self._execute_post_to_channel
         }
 
     def _sync_tool_clients(self) -> None:
         """Ensure tool instances share initialized AWS clients."""
         cloudwatch_client = self.aws_clients.get('cloudwatch')
         ec2_client = self.aws_clients.get('ec2')
+        elbv2_client = self.aws_clients.get('elbv2')
+        cloudtrail_client = self.aws_clients.get('cloudtrail')
+        ecs_client = self.aws_clients.get('ecs')
 
         if cloudwatch_client:
             self.cloudwatch_tool.cloudwatch_client = cloudwatch_client
+            self.ec2_status_tool.cloudwatch_client = cloudwatch_client  # Share CloudWatch client with EC2 status tool
         if ec2_client:
             self.ec2_tool.ec2_client = ec2_client
+            self.ec2_status_tool.ec2_client = ec2_client  # Share EC2 client with EC2 status tool
             self.ec2_reboot_tool.ec2_client = ec2_client
+        if elbv2_client:
+            self.alb_tool.elbv2_client = elbv2_client
+        if cloudtrail_client:
+            self.cloudtrail_tool.cloudtrail_client = cloudtrail_client
+        if ecs_client:
+            self.ecs_scaling_tool.ecs_client = ecs_client
     
     def _initialize_aws_clients(self) -> None:
         """Initialize AWS service clients"""
         try:
             self.aws_clients['cloudwatch'] = boto3.client('cloudwatch')
             self.aws_clients['ec2'] = boto3.client('ec2')
+            self.aws_clients['elbv2'] = boto3.client('elbv2')
+            self.aws_clients['cloudtrail'] = boto3.client('cloudtrail')
+            self.aws_clients['ecs'] = boto3.client('ecs')
             logger.info("AWS clients initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize AWS clients: {e}")
             # Continue without clients - tools will handle gracefully
+    
+    def executeOperation(
+        self,
+        operation: str,
+        parameters: Dict[str, Any],
+        context: ExecutionContext
+    ) -> ToolResult:
+        """
+        Execute a single operation with proper routing
+        Requirements: 2.2, 3.1, 10.1, 11.1
+        
+        Args:
+            operation: Operation name to execute
+            parameters: Operation parameters
+            context: Execution context with correlation ID and user info
+            
+        Returns:
+            ToolResult with execution outcome
+        """
+        logger.info(f"Executing operation: {operation} for correlation_id: {context.correlation_id}")
+        
+        # Create tool call from operation and parameters
+        tool_call = ToolCall(
+            tool_name=operation,
+            args=parameters,
+            correlation_id=context.correlation_id,
+            user_id=context.user_id
+        )
+        
+        # Execute single tool call
+        results = self.execute_tools([tool_call], context)
+        
+        # Return the first (and only) result
+        return results[0] if results else ToolResult(
+            tool_name=operation,
+            success=False,
+            error="No result returned from tool execution",
+            execution_mode=self.execution_mode,
+            correlation_id=context.correlation_id
+        )
     
     def execute_tools(
         self,
@@ -256,6 +337,72 @@ class ToolExecutionEngine:
         
         return False
     
+    def _execute_get_ec2_status(
+        self,
+        tool_call: ToolCall,
+        context: ExecutionContext
+    ) -> ToolResult:
+        """
+        Execute EC2 status retrieval with CloudWatch metrics integration
+        Requirements: 4.1, 4.2
+        """
+        return self.ec2_status_tool.execute(tool_call, context.correlation_id)
+    
+    def _execute_alb_target_health(
+        self,
+        tool_call: ToolCall,
+        context: ExecutionContext
+    ) -> ToolResult:
+        """
+        Execute ALB target health check using dedicated tool
+        Requirements: 4.1, 4.2, 4.3
+        """
+        return self.alb_tool.execute(tool_call, context.correlation_id)
+    
+    def _execute_cloudtrail_search(
+        self,
+        tool_call: ToolCall,
+        context: ExecutionContext
+    ) -> ToolResult:
+        """
+        Execute CloudTrail event search using dedicated tool
+        Requirements: 4.1, 4.2, 4.3
+        """
+        return self.cloudtrail_tool.execute(tool_call, context.correlation_id)
+    
+    def _execute_scale_ecs_service(
+        self,
+        tool_call: ToolCall,
+        context: ExecutionContext
+    ) -> ToolResult:
+        """
+        Execute ECS service scaling using dedicated tool
+        Requirements: 5.4, 7.1, 7.2
+        """
+        return self.ecs_scaling_tool.execute(tool_call, context.correlation_id)
+    
+    def _execute_create_incident(
+        self,
+        tool_call: ToolCall,
+        context: ExecutionContext
+    ) -> ToolResult:
+        """
+        Execute incident record creation using dedicated tool
+        Requirements: 6.1, 6.2, 6.3
+        """
+        return self.incident_tool.execute(tool_call, context.correlation_id)
+    
+    def _execute_post_to_channel(
+        self,
+        tool_call: ToolCall,
+        context: ExecutionContext
+    ) -> ToolResult:
+        """
+        Execute channel notification posting using dedicated tool
+        Requirements: 6.1, 6.2, 6.3
+        """
+        return self.channel_tool.execute(tool_call, context.correlation_id)
+
     def _execute_cloudwatch_metrics(
         self,
         tool_call: ToolCall,
@@ -351,9 +498,17 @@ class ToolExecutionEngine:
         # Update AWS diagnosis tools execution mode
         self.cloudwatch_tool.execution_mode = execution_mode
         self.ec2_tool.execution_mode = execution_mode
+        self.ec2_status_tool.execution_mode = execution_mode  # Update execution mode for EC2 status tool
+        self.alb_tool.execution_mode = execution_mode
+        self.cloudtrail_tool.execution_mode = execution_mode
         
         # Update AWS remediation tools execution mode
         self.ec2_reboot_tool.execution_mode = execution_mode
+        self.ecs_scaling_tool.execution_mode = execution_mode
+        
+        # Update workflow tools execution mode
+        self.incident_tool.execution_mode = execution_mode
+        self.channel_tool.execution_mode = execution_mode
         
         # Reinitialize AWS clients if needed
         execution_mode_value = (

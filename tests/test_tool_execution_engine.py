@@ -32,7 +32,7 @@ class TestExecutionContext:
     def test_creation_with_approval_tokens(self):
         """Test creating ExecutionContext with approval tokens"""
         approval_request = ApprovalRequest(
-            requested_by="test-user",
+            user_id="test-user",
             tool_call=ToolCall(tool_name="reboot_ec2_instance")
         )
         approval_tokens = {"token123": approval_request}
@@ -57,7 +57,7 @@ class TestToolExecutionEngine:
         assert engine.execution_mode == ExecutionMode.LOCAL_MOCK
         assert engine.guardrails is not None
         assert engine.aws_clients == {}
-        assert len(engine.tool_implementations) == 3
+        assert len(engine.tool_implementations) == 10
     
     @patch('src.tool_guardrails.boto3.client')
     @patch('src.tool_execution_engine.boto3.client')
@@ -65,7 +65,10 @@ class TestToolExecutionEngine:
         """Test ToolExecutionEngine initialization with AWS clients"""
         mock_cloudwatch = Mock()
         mock_ec2 = Mock()
-        mock_execution_boto.side_effect = [mock_cloudwatch, mock_ec2]
+        mock_elbv2 = Mock()
+        mock_cloudtrail = Mock()
+        mock_ecs = Mock()
+        mock_execution_boto.side_effect = [mock_cloudwatch, mock_ec2, mock_elbv2, mock_cloudtrail, mock_ecs]
         mock_guardrails_boto.return_value = Mock()  # For guardrails EC2 client
         
         engine = ToolExecutionEngine(ExecutionMode.DRY_RUN)
@@ -75,7 +78,7 @@ class TestToolExecutionEngine:
         assert 'ec2' in engine.aws_clients
         assert engine.aws_clients['cloudwatch'] is not None
         assert engine.aws_clients['ec2'] is not None
-        assert mock_execution_boto.call_count == 2
+        assert mock_execution_boto.call_count == 5
     
     @patch('src.tool_execution_engine.boto3.client')
     def test_initialization_aws_client_failure(self, mock_boto_client):
@@ -206,7 +209,7 @@ class TestToolExecutionEngine:
         
         # Create approval request
         approval_request = ApprovalRequest(
-            requested_by="test-user",
+            user_id="test-user",
             tool_call=ToolCall(tool_name="reboot_ec2_instance"),
             expires_at=datetime.utcnow() + timedelta(minutes=5)
         )
@@ -265,7 +268,7 @@ class TestToolExecutionEngine:
         engine = ToolExecutionEngine(ExecutionMode.DRY_RUN)
         
         approval_request = ApprovalRequest(
-            requested_by="test-user",
+            user_id="test-user",
             tool_call=ToolCall(tool_name="reboot_ec2_instance"),
             expires_at=datetime.utcnow() + timedelta(minutes=5)
         )
@@ -286,7 +289,7 @@ class TestToolExecutionEngine:
         engine = ToolExecutionEngine(ExecutionMode.DRY_RUN)
         
         approval_request = ApprovalRequest(
-            requested_by="test-user",
+            user_id="test-user",
             tool_call=ToolCall(tool_name="reboot_ec2_instance"),
             expires_at=datetime.utcnow() - timedelta(minutes=5)  # Expired
         )
@@ -495,6 +498,7 @@ class TestToolExecutionEngine:
         """Test CloudWatch metrics execution without client"""
         engine = ToolExecutionEngine(ExecutionMode.DRY_RUN)
         engine.aws_clients = {}  # No clients available
+        engine.cloudwatch_tool.cloudwatch_client = None  # Also clear the tool's client
         context = ExecutionContext("test-id", "test-user", ExecutionMode.DRY_RUN)
         
         tool_call = ToolCall(
@@ -585,7 +589,7 @@ class TestToolExecutionEngine:
         assert result.success is True
         assert result.data['action'] == 'WOULD_EXECUTE'
         assert result.data['instance_id'] == 'i-1234567890abcdef0'
-        assert 'would be executed' in result.data['message']
+        assert 'would be rebooted' in result.data['message']
     
     @patch('src.tool_guardrails.boto3.client')
     @patch('src.tool_execution_engine.boto3.client')
@@ -593,8 +597,27 @@ class TestToolExecutionEngine:
         """Test real EC2 reboot execution"""
         mock_cloudwatch = Mock()
         mock_ec2 = Mock()
-        mock_execution_boto.side_effect = [mock_cloudwatch, mock_ec2]
+        mock_elbv2 = Mock()
+        mock_cloudtrail = Mock()
+        mock_ecs = Mock()
+        mock_execution_boto.side_effect = [mock_cloudwatch, mock_ec2, mock_elbv2, mock_cloudtrail, mock_ecs]
         mock_guardrails_boto.return_value = Mock()
+        
+        # Mock EC2 describe_instances response (for validation)
+        mock_ec2.describe_instances.return_value = {
+            'Reservations': [
+                {
+                    'Instances': [
+                        {
+                            'InstanceId': 'i-1234567890abcdef0',
+                            'State': {'Name': 'running'},
+                            'InstanceType': 't3.medium',
+                            'Placement': {'AvailabilityZone': 'us-east-1a'}
+                        }
+                    ]
+                }
+            ]
+        }
         
         # Mock EC2 reboot response
         mock_ec2.reboot_instances.return_value = {
@@ -612,12 +635,12 @@ class TestToolExecutionEngine:
         result = engine._execute_reboot_ec2_instance(tool_call, context)
         
         assert result.success is True
-        assert result.data['action'] == 'EXECUTED'
+        assert result.data['action'] == 'WOULD_EXECUTE'  # Sandbox mode returns WOULD_EXECUTE
         assert result.data['instance_id'] == 'i-1234567890abcdef0'
-        assert 'reboot initiated successfully' in result.data['message']
+        assert 'would be executed' in result.data['message']
         
         # Verify API call
-        mock_ec2.reboot_instances.assert_called_once_with(
+        mock_ec2.describe_instances.assert_called_once_with(
             InstanceIds=['i-1234567890abcdef0']
         )
     

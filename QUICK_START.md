@@ -126,11 +126,11 @@ aws logs tail /aws/lambda/opsagent-controller-sandbox --follow --region eu-west-
 
 ## Key Files Fixed
 
-1. ✅ [src/requirements.txt](src/requirements.txt) - Fixed duplicate PyJWT, added jsonschema
-2. ✅ [requirements.txt](requirements.txt) - Updated with all dependencies
-3. ✅ [infrastructure/samconfig.toml](infrastructure/samconfig.toml) - Changed region to eu-west-2
-4. ✅ [teams-app/manifest.json](teams-app/manifest.json) - Already configured with correct credentials
-5. ✅ [infrastructure/template.yaml](infrastructure/template.yaml) - Already configured with correct credentials
+1. [src/requirements.txt](src/requirements.txt) - Fixed duplicate PyJWT, added jsonschema
+2. [requirements.txt](requirements.txt) - Updated with all dependencies
+3. [infrastructure/samconfig.toml](infrastructure/samconfig.toml) - Changed region to eu-west-2
+4. [teams-app/manifest.json](teams-app/manifest.json) - Already configured with correct credentials
+5. [infrastructure/template.yaml](infrastructure/template.yaml) - Already configured with correct credentials
 
 ## Next Steps
 

@@ -14,7 +14,7 @@ from dataclasses import dataclass, asdict
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 
-from models import InternalMessage, ToolCall, ToolResult, ApprovalRequest, ExecutionMode
+from src.models import InternalMessage, ToolCall, ToolResult, ApprovalRequest, ExecutionMode
 
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class AuditLogger:
     def __init__(self, 
                  cloudwatch_log_group: str = "/aws/lambda/opsagent-controller",
                  dynamodb_table_name: Optional[str] = None,
-                 execution_mode: ExecutionMode = ExecutionMode.LOCAL_MOCK):
+                 execution_mode: ExecutionMode = ExecutionMode.SANDBOX_LIVE):
         """
         Initialize audit logger
         
@@ -86,8 +86,7 @@ class AuditLogger:
         self.cloudwatch_logs_client = None
         self.dynamodb_client = None
         
-        if execution_mode != ExecutionMode.LOCAL_MOCK:
-            self._initialize_clients()
+        self._initialize_clients()
     
     def _initialize_clients(self) -> None:
         """Initialize AWS clients for CloudWatch and DynamoDB"""
@@ -183,7 +182,7 @@ class AuditLogger:
         event_data = {
             "approval_token": self._sanitize_token(approval_request.token),
             "expires_at": approval_request.expires_at.isoformat() + "Z",
-            "requested_by": approval_request.requested_by,
+            "requested_by": approval_request.user_id,
             "risk_level": approval_request.risk_level,
             "tool_name": approval_request.tool_call.tool_name if approval_request.tool_call else None,
             "tool_args": self._sanitize_tool_args(approval_request.tool_call.args) if approval_request.tool_call else None
@@ -219,7 +218,7 @@ class AuditLogger:
         event_data = {
             "approval_token": self._sanitize_token(approval_request.token),
             "decision": decision.lower(),
-            "requested_by": approval_request.requested_by,
+            "requested_by": approval_request.user_id,
             "tool_name": approval_request.tool_call.tool_name if approval_request.tool_call else None
         }
         
@@ -271,6 +270,39 @@ class AuditLogger:
             event_type=AuditEventType.SYSTEM_STATUS_CHECK,
             correlation_id=correlation_id,
             user_id=user_id,
+            timestamp=datetime.utcnow(),
+            event_data=event_data,
+            execution_mode=self.execution_mode
+        )
+        
+        self._write_audit_event(event)
+    
+    def log_plugin_request(self, plugin_request, user_context, additional_context: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Log Amazon Q Business plugin request
+        Requirements: 9.1, 9.2
+        
+        Args:
+            plugin_request: PluginRequest object
+            user_context: UserContext object
+            additional_context: Optional additional context
+        """
+        event_data = {
+            "operation": plugin_request.operation,
+            "parameters": self._sanitize_tool_args(plugin_request.parameters),
+            "user_context": {
+                "teams_tenant": user_context.teams_tenant if user_context else None,
+                "session_id": user_context.session_id if user_context else None
+            }
+        }
+        
+        if additional_context:
+            event_data.update(self._sanitize_context_data(additional_context))
+        
+        event = AuditEvent(
+            event_type=AuditEventType.TOOL_CALL_REQUESTED,  # Reuse existing event type
+            correlation_id=plugin_request.correlation_id,
+            user_id=user_context.user_id if user_context else "unknown",
             timestamp=datetime.utcnow(),
             event_data=event_data,
             execution_mode=self.execution_mode
@@ -484,10 +516,6 @@ class AuditLogger:
         
         self.execution_mode = execution_mode
         
-        # Reinitialize clients if switching to/from LOCAL_MOCK
-        if execution_mode != ExecutionMode.LOCAL_MOCK and (not self.cloudwatch_logs_client):
+        # Reinitialize clients if needed
+        if not self.cloudwatch_logs_client:
             self._initialize_clients()
-        elif execution_mode == ExecutionMode.LOCAL_MOCK:
-            # Clear clients in LOCAL_MOCK mode
-            self.cloudwatch_logs_client = None
-            self.dynamodb_client = None

@@ -4,13 +4,18 @@ Requirements: 4.1, 4.5
 """
 import json
 import logging
+import os
 import time
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
-from models import ToolCall, ExecutionMode
+try:
+    from src.models import ToolCall, ExecutionMode
+except ImportError:
+    # Fallback for direct execution
+    from models import ToolCall, ExecutionMode
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +407,7 @@ Keep the summary professional and actionable."""
 
 class MockLLMProvider(LLMProvider):
     """
-    Mock LLM provider for testing and LOCAL_MOCK mode
+    Mock LLM provider for testing and SANDBOX_LIVE mode
     Requirements: 7.1
     """
     
@@ -500,8 +505,29 @@ def create_llm_provider(execution_mode: ExecutionMode, **kwargs) -> LLMProvider:
     Factory function to create appropriate LLM provider based on execution mode
     Requirements: 7.1, 7.4
     """
-    if execution_mode == ExecutionMode.LOCAL_MOCK:
-        return MockLLMProvider()
-    else:
-        # For DRY_RUN and SANDBOX_LIVE, use real Bedrock
-        return BedrockLLMProvider(**kwargs)
+    # Check if Amazon Q integration is configured
+    amazon_q_app_id = kwargs.get('amazon_q_app_id') or os.environ.get('AMAZON_Q_APP_ID')
+    
+    if amazon_q_app_id:
+        # Use Amazon Q hybrid provider
+        try:
+            from .amazon_q_provider import create_amazon_q_provider
+        except ImportError:
+            from amazon_q_provider import create_amazon_q_provider
+        
+        user_id = kwargs.get('amazon_q_user_id') or os.environ.get('AMAZON_Q_USER_ID', 'opsagent-user')
+        session_id = kwargs.get('amazon_q_session_id')
+        region = kwargs.get('region_name') or os.environ.get('AWS_REGION', 'us-east-1')
+        bedrock_model_id = kwargs.get('bedrock_model_id') or os.environ.get('BEDROCK_MODEL_ID')
+        
+        logger.info(f"Creating Amazon Q hybrid provider for app {amazon_q_app_id}")
+        return create_amazon_q_provider(
+            application_id=amazon_q_app_id,
+            user_id=user_id,
+            session_id=session_id,
+            region=region,
+            bedrock_model_id=bedrock_model_id
+        )
+    
+    # For SANDBOX_LIVE, use real Bedrock
+    return BedrockLLMProvider(**kwargs)

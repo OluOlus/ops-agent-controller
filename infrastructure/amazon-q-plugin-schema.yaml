@@ -1,0 +1,584 @@
+openapi: 3.0.0
+info:
+  title: OpsAgent Actions Plugin for Amazon Q Business
+  version: 1.0.0
+  description: |
+    Secure AWS operations plugin for Amazon Q Business.
+    
+    **Key Features:**
+    - 8 operations across 3 categories: Diagnostic (4), Write (2), Workflow (2)
+    - Approval-gated write operations with 15-minute token expiry
+    - Tag-based resource scoping (OpsAgentManaged=true)
+    - Full audit trail with correlation IDs
+    - Multiple execution modes: LOCAL_MOCK, DRY_RUN, SANDBOX_LIVE
+    
+    **Security Model:**
+    - API key authentication
+    - User authorization via allow-lists
+    - Resource tag validation for write operations
+    - Cryptographic approval tokens
+    - Comprehensive audit logging
+  contact:
+    name: Platform Engineering Team
+    email: platform-team@company.com
+  license:
+    name: MIT
+
+servers:
+  - url: ${PLUGIN_API_ENDPOINT}
+    description: OpsAgent Actions API
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /operations/diagnostic:
+    post:
+      summary: Execute diagnostic operations
+      description: |
+        Execute read-only diagnostic operations for AWS resource health and metrics.
+        No approval required - returns immediate results.
+        
+        **Supported Operations:**
+        - `get_ec2_status`: EC2 instance status and metrics
+        - `get_cloudwatch_metrics`: CloudWatch metrics with time windows  
+        - `describe_alb_target_health`: ALB/Target Group health status
+        - `search_cloudtrail_events`: CloudTrail event search with filters
+      operationId: executeDiagnostic
+      tags:
+        - Diagnostics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiagnosticRequest'
+            examples:
+              get_ec2_status:
+                summary: Get EC2 instance status
+                value:
+                  operation: get_ec2_status
+                  parameters:
+                    instance_id: "i-1234567890abcdef0"
+                    metrics: ["cpu", "memory", "network"]
+                    time_window: "15m"
+                  user_context:
+                    user_id: "user@company.com"
+                    teams_tenant: "company.onmicrosoft.com"
+      responses:
+        '200':
+          description: Diagnostic operation completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /operations/propose:
+    post:
+      summary: Propose write action for approval
+      description: |
+        Propose a write operation that requires approval. Validates request,
+        checks resource tags, and returns approval token if valid.
+        
+        **Supported Write Operations:**
+        - `reboot_ec2`: Reboot EC2 instance (requires OpsAgentManaged=true tag)
+        - `scale_ecs_service`: Scale ECS service desired count (requires OpsAgentManaged=true tag)
+        
+        **Security:** Approval token expires in 15 minutes and can only be used once.
+      operationId: proposeAction
+      tags:
+        - Write Operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposeActionRequest'
+            examples:
+              reboot_ec2:
+                summary: Propose EC2 reboot
+                value:
+                  operation: propose_action
+                  parameters:
+                    action: "reboot_ec2"
+                    instance_id: "i-1234567890abcdef0"
+                    reason: "High CPU utilization, unresponsive to SSH"
+                  user_context:
+                    user_id: "user@company.com"
+                    teams_tenant: "company.onmicrosoft.com"
+      responses:
+        '200':
+          description: Action proposal created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /operations/approve:
+    post:
+      summary: Execute approved action
+      description: |
+        Execute a previously approved write operation using valid approval token.
+        Token must be unexpired and unused. Upon successful validation,
+        the action will be executed and the token consumed.
+      operationId: approveAction
+      tags:
+        - Write Operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveActionRequest'
+            examples:
+              approve_reboot:
+                summary: Approve EC2 reboot
+                value:
+                  operation: approve_action
+                  parameters:
+                    approval_token: "approve-abc123def456"
+                  user_context:
+                    user_id: "user@company.com"
+                    teams_tenant: "company.onmicrosoft.com"
+      responses:
+        '200':
+          description: Action executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '410':
+          description: Approval token expired or already used
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /operations/workflow:
+    post:
+      summary: Execute workflow operations
+      description: |
+        Execute workflow operations for incident management and notifications.
+        No approval required but fully audited.
+        
+        **Supported Workflow Operations:**
+        - `create_incident_record`: Create incident record with summary, severity, and links
+        - `post_summary_to_channel`: Post operational summary to Teams channel or webhook
+      operationId: executeWorkflow
+      tags:
+        - Workflow Operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowRequest'
+            examples:
+              create_incident:
+                summary: Create incident record
+                value:
+                  operation: create_incident_record
+                  parameters:
+                    summary: "High CPU utilization on production instances"
+                    severity: "medium"
+                    links:
+                      - "https://console.aws.amazon.com/ec2/v2/home#Instances:instanceId=i-1234567890abcdef0"
+                      - "https://monitoring.company.com/dashboard/ec2"
+                  user_context:
+                    user_id: "user@company.com"
+                    teams_tenant: "company.onmicrosoft.com"
+      responses:
+        '200':
+          description: Workflow operation completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      summary: Health check endpoint
+      description: |
+        Returns health status of the OpsAgent API, including execution mode,
+        AWS service connectivity, and system status.
+      operationId: healthCheck
+      tags:
+        - System
+      security: []
+      responses:
+        '200':
+          description: System is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: System is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for Amazon Q Business plugin authentication
+
+  schemas:
+    # Base request schemas
+    DiagnosticRequest:
+      type: object
+      required:
+        - operation
+        - parameters
+        - user_context
+      properties:
+        operation:
+          type: string
+          enum:
+            - get_ec2_status
+            - get_cloudwatch_metrics
+            - describe_alb_target_health
+            - search_cloudtrail_events
+          description: The diagnostic operation to execute
+        parameters:
+          type: object
+          description: Operation-specific parameters
+        user_context:
+          $ref: '#/components/schemas/UserContext'
+
+    ProposeActionRequest:
+      type: object
+      required:
+        - operation
+        - parameters
+        - user_context
+      properties:
+        operation:
+          type: string
+          enum: [propose_action]
+          description: Always 'propose_action' for this endpoint
+        parameters:
+          type: object
+          required:
+            - action
+            - reason
+          properties:
+            action:
+              type: string
+              enum: [reboot_ec2, scale_ecs_service]
+              description: The write action to propose
+            instance_id:
+              type: string
+              pattern: '^i-[0-9a-f]{8,17}$'
+              description: EC2 instance ID (required for reboot_ec2)
+            cluster:
+              type: string
+              description: ECS cluster name (required for scale_ecs_service)
+            service:
+              type: string
+              description: ECS service name (required for scale_ecs_service)
+            desired_count:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: Desired task count (required for scale_ecs_service)
+            reason:
+              type: string
+              minLength: 10
+              maxLength: 500
+              description: Justification for the action
+        user_context:
+          $ref: '#/components/schemas/UserContext'
+
+    ApproveActionRequest:
+      type: object
+      required:
+        - operation
+        - parameters
+        - user_context
+      properties:
+        operation:
+          type: string
+          enum: [approve_action]
+          description: Always 'approve_action' for this endpoint
+        parameters:
+          type: object
+          required:
+            - approval_token
+          properties:
+            approval_token:
+              type: string
+              pattern: '^approve-[a-zA-Z0-9]{12,}$'
+              description: Approval token from propose_action response
+        user_context:
+          $ref: '#/components/schemas/UserContext'
+
+    WorkflowRequest:
+      type: object
+      required:
+        - operation
+        - parameters
+        - user_context
+      properties:
+        operation:
+          type: string
+          enum:
+            - create_incident_record
+            - post_summary_to_channel
+          description: The workflow operation to execute
+        parameters:
+          type: object
+          description: Operation-specific parameters
+        user_context:
+          $ref: '#/components/schemas/UserContext'
+
+    UserContext:
+      type: object
+      required:
+        - user_id
+      properties:
+        user_id:
+          type: string
+          format: email
+          description: User email address
+        teams_tenant:
+          type: string
+          description: Microsoft Teams tenant ID
+        session_id:
+          type: string
+          description: Amazon Q Business session ID
+
+    # Response schemas
+    OperationResponse:
+      type: object
+      required:
+        - success
+        - correlation_id
+      properties:
+        success:
+          type: boolean
+          description: Whether the operation succeeded
+        summary:
+          type: string
+          description: Human-readable summary for chat display
+        details:
+          type: object
+          description: Structured operation results
+        approval_required:
+          type: boolean
+          description: Whether approval is required (for write operations)
+        approval_token:
+          type: string
+          description: Token for approving actions (for propose operations)
+        expires_at:
+          type: string
+          format: date-time
+          description: Token expiration time
+        action_summary:
+          type: string
+          description: Summary of proposed/executed action
+        risk_level:
+          type: string
+          enum: [low, medium, high]
+          description: Risk assessment
+        instructions:
+          type: string
+          description: Instructions for next steps
+        action_executed:
+          type: string
+          description: Name of executed action
+        target_resource:
+          type: string
+          description: Resource that was modified
+        execution_status:
+          type: string
+          enum: [completed, failed, partial, simulated]
+          description: Execution outcome
+        execution_time:
+          type: string
+          format: date-time
+          description: When the action was executed
+        incident_id:
+          type: string
+          description: Created incident ID (for workflow operations)
+        message_id:
+          type: string
+          description: Posted message ID (for workflow operations)
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        posted_at:
+          type: string
+          format: date-time
+          description: Posting timestamp
+        notification_sent:
+          type: boolean
+          description: Whether notification was sent
+        execution_mode:
+          type: string
+          enum: [LOCAL_MOCK, DRY_RUN, SANDBOX_LIVE]
+          description: Current execution mode
+        correlation_id:
+          type: string
+          description: Unique request identifier
+        error:
+          $ref: '#/components/schemas/ErrorDetails'
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - execution_mode
+        - version
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: Overall system health
+        execution_mode:
+          type: string
+          enum: [LOCAL_MOCK, DRY_RUN, SANDBOX_LIVE]
+          description: Current execution mode
+        version:
+          type: string
+          description: API version
+        timestamp:
+          type: string
+          format: date-time
+          description: Health check timestamp
+        services:
+          type: object
+          description: Individual service health status
+          properties:
+            aws_connectivity:
+              type: string
+              enum: [ok, degraded, error]
+            dynamodb:
+              type: string
+              enum: [ok, degraded, error]
+            cloudwatch:
+              type: string
+              enum: [ok, degraded, error]
+
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+          description: Always false for error responses
+        error:
+          $ref: '#/components/schemas/ErrorDetails'
+
+    ErrorDetails:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - AUTHENTICATION_ERROR
+            - AUTHORIZATION_ERROR
+            - RESOURCE_NOT_FOUND
+            - RESOURCE_NOT_TAGGED
+            - TOKEN_EXPIRED
+            - TOKEN_INVALID
+            - AWS_API_ERROR
+            - SYSTEM_ERROR
+          description: Error code for programmatic handling
+        message:
+          type: string
+          description: Human-readable error message
+        correlation_id:
+          type: string
+          description: Request correlation ID
+        retry_after:
+          type: integer
+          description: Seconds to wait before retrying (for rate limiting)
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+tags:
+  - name: Diagnostics
+    description: Read-only AWS resource diagnostics (4 operations, no approval required)
+  - name: Write Operations
+    description: Controlled remediation actions (2 operations, approval required)
+  - name: Workflow Operations
+    description: Incident management and notifications (2 operations, no approval, fully audited)
+  - name: System
+    description: System health and status endpoints
+
+externalDocs:
+  description: OpsAgent Actions Documentation
+  url: https://docs.opsagent.company.com/api

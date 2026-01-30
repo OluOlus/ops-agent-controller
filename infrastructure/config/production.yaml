@@ -1,0 +1,291 @@
+# OpsAgent Controller - Production Environment Configuration
+
+# Environment Settings
+environment: production
+execution_mode: SANDBOX_LIVE  # Production should never use LOCAL_MOCK
+
+# AWS Configuration
+aws:
+  region: us-east-1
+  account_id: "123456789012"  # Replace with your production AWS account ID
+
+# API Gateway Configuration
+api_gateway:
+  stage_name: production
+  throttling:
+    rate_limit: 500  # Higher limits for production
+    burst_limit: 1000
+  cors:
+    allow_origins: ["https://company.com", "https://*.company.com"]  # Restrict origins
+    allow_methods: ["GET", "POST", "OPTIONS"]
+    allow_headers: ["Content-Type", "X-Amz-Date", "Authorization", "X-Api-Key", "X-Amz-Security-Token"]
+
+# Lambda Configuration
+lambda:
+  memory_size: 1024  # More memory for production
+  timeout: 30
+  runtime: python3.11
+  reserved_concurrency: 100  # Prevent runaway executions
+  environment_variables:
+    EXECUTION_MODE: SANDBOX_LIVE
+    ENVIRONMENT: production
+    LLM_PROVIDER: bedrock
+    BEDROCK_MODEL_ID: anthropic.claude-3-sonnet-20240229-v1:0
+
+# DynamoDB Configuration
+dynamodb:
+  billing_mode: PAY_PER_REQUEST
+  encryption:
+    enabled: true
+    kms_key: alias/opsagent-production
+  point_in_time_recovery: true
+  backup:
+    enabled: true
+    retention_days: 35
+  ttl:
+    audit_logs: 7776000  # 90 days in seconds
+    incidents: 94608000  # 3 years in seconds for compliance
+
+# CloudWatch Configuration
+cloudwatch:
+  log_retention_days: 90  # Longer retention for production
+  metrics_enabled: true
+  tracing_enabled: true
+  detailed_monitoring: true
+
+# Security Configuration
+security:
+  api_key_rotation_days: 30  # More frequent rotation in production
+  approval_token_expiry_minutes: 15
+  
+  # Restricted user allow-list for production
+  allowed_users:
+    - "senior-platform-engineer@company.com"
+    - "ops-lead@company.com"
+    - "incident-commander@company.com"
+  
+  # Strict resource tagging requirements
+  required_tags:
+    write_operations:
+      - key: "OpsAgentManaged"
+        value: "true"
+      - key: "Environment"
+        value: "production"
+      - key: "CriticalityLevel"
+        values: ["high", "critical"]
+    
+  # Enhanced IAM permissions with conditions
+  iam_permissions:
+    diagnostic:
+      - "ec2:DescribeInstances"
+      - "ec2:DescribeInstanceStatus"
+      - "cloudwatch:GetMetricStatistics"
+      - "cloudwatch:ListMetrics"
+      - "elasticloadbalancing:DescribeTargetHealth"
+      - "cloudtrail:LookupEvents"
+    write:
+      - "ec2:RebootInstances"
+      - "ecs:UpdateService"
+    workflow:
+      - "dynamodb:PutItem"
+      - "sns:Publish"
+    
+    # Additional conditions for production
+    conditions:
+      - condition: "StringEquals"
+        key: "aws:ResourceTag/OpsAgentManaged"
+        value: "true"
+      - condition: "StringEquals"
+        key: "aws:ResourceTag/Environment"
+        value: "production"
+
+# Test Resources Configuration
+test_resources:
+  create_test_instance: false  # No test resources in production
+  
+# Amazon Q Business Integration
+amazon_q:
+  enabled: true  # Enable for production
+  app_id: "REPLACE_WITH_PRODUCTION_Q_APP_ID"
+  user_id: "opsagent-production"
+  session_id: ""
+
+# Monitoring and Alerting
+monitoring:
+  cloudwatch_alarms:
+    enabled: true
+    error_rate_threshold: 1  # Lower threshold for production
+    latency_threshold: 5000  # Lower latency threshold
+    
+    # Additional production alarms
+    custom_alarms:
+      - name: "HighUnauthorizedAccess"
+        metric: "UnauthorizedRequests"
+        threshold: 5
+        period: 300
+      - name: "HighApprovalTokenUsage"
+        metric: "ApprovalTokensGenerated"
+        threshold: 50
+        period: 3600
+    
+  notifications:
+    sns_topic: "opsagent-notifications-production"
+    email_endpoints:
+      - "platform-team@company.com"
+      - "security-team@company.com"
+      - "ops-oncall@company.com"
+    
+    # PagerDuty integration
+    pagerduty:
+      enabled: true
+      service_key: "REPLACE_WITH_PAGERDUTY_SERVICE_KEY"
+      severity_mapping:
+        critical: "critical"
+        high: "error"
+        medium: "warning"
+        low: "info"
+
+# Plugin Configuration for Amazon Q Business
+plugin:
+  name: "OpsAgent Actions - Production"
+  description: "Secure AWS operations for platform engineers (Production)"
+  version: "1.0.0"
+  
+  # Operations configuration
+  operations:
+    diagnostic:
+      - get_ec2_status
+      - get_cloudwatch_metrics
+      - describe_alb_target_health
+      - search_cloudtrail_events
+    write:
+      - reboot_ec2
+      - scale_ecs_service
+    workflow:
+      - create_incident_record
+      - post_summary_to_channel
+  
+  # Stricter rate limiting for production
+  rate_limits:
+    requests_per_minute: 30  # Lower limits to prevent abuse
+    requests_per_hour: 500
+    burst_capacity: 5
+
+# Deployment Configuration
+deployment:
+  stack_name: "opsagent-controller-production"
+  template_file: "template.yaml"
+  parameter_overrides:
+    Environment: production
+    ExecutionMode: SANDBOX_LIVE
+    CreateTestResources: "false"
+    EnableDynamoDBEncryption: "true"
+  
+  # Production deployment requirements
+  requirements:
+    - name: "Change Management Approval"
+      description: "Deployment must be approved through change management process"
+    - name: "Security Review"
+      description: "Security team must review configuration changes"
+    - name: "Backup Verification"
+      description: "Verify backups are working before deployment"
+  
+  # Post-deployment steps
+  post_deployment:
+    - name: "Update API Key"
+      command: "aws ssm put-parameter --name /opsagent/api-key --value SECURE_PRODUCTION_KEY --type SecureString --overwrite"
+    - name: "Configure Production User Allow-list"
+      command: "aws ssm put-parameter --name /opsagent/allowed-users --value 'senior-platform-engineer@company.com,ops-lead@company.com' --type StringList --overwrite"
+    - name: "Test Health Endpoint"
+      command: "curl -f https://API_ENDPOINT/health"
+    - name: "Verify Monitoring"
+      command: "aws cloudwatch describe-alarms --alarm-names opsagent-error-rate-production"
+    - name: "Test Approval Workflow"
+      command: "python scripts/test-approval-workflow.py --environment production"
+
+# Compliance and Governance
+compliance:
+  # Audit requirements
+  audit:
+    retention_period_days: 2555  # 7 years for compliance
+    immutable_logs: true
+    log_integrity_monitoring: true
+  
+  # Access control
+  access_control:
+    mfa_required: true
+    session_timeout_minutes: 60
+    concurrent_session_limit: 1
+  
+  # Data protection
+  data_protection:
+    encryption_at_rest: true
+    encryption_in_transit: true
+    key_rotation_days: 90
+    data_classification: "confidential"
+
+# Disaster Recovery
+disaster_recovery:
+  backup_strategy:
+    dynamodb:
+      continuous_backup: true
+      cross_region_backup: true
+      backup_region: "us-west-2"
+    
+    lambda:
+      code_backup: true
+      configuration_backup: true
+    
+    api_gateway:
+      configuration_backup: true
+      stage_backup: true
+  
+  recovery_objectives:
+    rto_minutes: 60  # Recovery Time Objective
+    rpo_minutes: 15  # Recovery Point Objective
+
+# Validation Rules
+validation:
+  required_parameters:
+    - Environment
+    - ExecutionMode
+    - aws.account_id
+    - amazon_q.app_id
+    - monitoring.notifications.pagerduty.service_key
+  
+  execution_mode_constraints:
+    production:
+      allowed_modes: [SANDBOX_LIVE]  # Only live mode in production
+      prohibited_modes: [LOCAL_MOCK, DRY_RUN]
+  
+  resource_constraints:
+    min_lambda_memory: 512
+    max_lambda_timeout: 30
+    max_api_rate_limit: 1000
+    
+  security_requirements:
+    - "API key must be rotated within 30 days"
+    - "All write operations must require approval"
+    - "All resources must have required tags"
+    - "User allow-list must be reviewed monthly"
+
+# Performance Tuning
+performance:
+  lambda:
+    provisioned_concurrency: 10  # Keep warm instances
+    memory_optimization: true
+    
+  api_gateway:
+    caching:
+      enabled: true
+      ttl_seconds: 300
+      cache_key_parameters: ["operation", "user_id"]
+    
+    compression: true
+    
+  dynamodb:
+    auto_scaling:
+      enabled: true
+      target_utilization: 70
+      min_capacity: 5
+      max_capacity: 100

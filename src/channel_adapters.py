@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 
-from models import (
+from src.models import (
     InternalMessage,
     ChannelType,
     ExecutionMode,
@@ -108,7 +108,7 @@ class ChannelAdapter(ABC):
     def format_approval_card(
         self,
         approval_request: ApprovalRequest,
-        execution_mode: ExecutionMode = ExecutionMode.DRY_RUN
+        execution_mode: ExecutionMode = ExecutionMode.SANDBOX_LIVE
     ) -> ChannelResponse:
         """
         Format approval request as interactive card/UI
@@ -279,7 +279,7 @@ class TeamsChannelAdapter(ChannelAdapter):
     def format_approval_card(
         self,
         approval_request: ApprovalRequest,
-        execution_mode: ExecutionMode = ExecutionMode.DRY_RUN
+        execution_mode: ExecutionMode = ExecutionMode.SANDBOX_LIVE
     ) -> ChannelResponse:
         """
         Format approval request as Teams Adaptive Card
@@ -310,8 +310,6 @@ class TeamsChannelAdapter(ChannelAdapter):
         
         # Determine action description and styling based on execution mode
         mode_descriptions = {
-            ExecutionMode.LOCAL_MOCK: "SIMULATE",
-            ExecutionMode.DRY_RUN: "SIMULATE (dry-run)",
             ExecutionMode.SANDBOX_LIVE: "EXECUTE"
         }
         mode_description = mode_descriptions.get(execution_mode, "EXECUTE")
@@ -341,7 +339,7 @@ class TeamsChannelAdapter(ChannelAdapter):
                         "body": [
                             {
                                 "type": "TextBlock",
-                                "text": "🔐 Approval Required",
+                                "text": "Approval Required",
                                 "weight": "Bolder",
                                 "size": "Large",
                                 "color": risk_color
@@ -422,7 +420,7 @@ class TeamsChannelAdapter(ChannelAdapter):
                         "actions": [
                             {
                                 "type": "Action.Submit",
-                                "title": f"✅ Approve {mode_description}",
+                                "title": f"Approve {mode_description}",
                                 "style": "positive",
                                 "data": {
                                     "action": "approve",
@@ -432,7 +430,7 @@ class TeamsChannelAdapter(ChannelAdapter):
                             },
                             {
                                 "type": "Action.Submit",
-                                "title": "❌ Deny Request",
+                                "title": "Deny Request",
                                 "style": "destructive",
                                 "data": {
                                     "action": "deny",
@@ -448,7 +446,7 @@ class TeamsChannelAdapter(ChannelAdapter):
         
         # Create the response message
         message = (
-            f"🔐 **Approval Required**\n\n"
+            f"**Approval Required**\n\n"
             f"**Operation:** {tool_call.tool_name}\n"
             f"**Mode:** {mode_description}\n"
             f"**Risk Level:** {approval_request.risk_level.upper()}\n"
@@ -545,7 +543,7 @@ class TeamsChannelAdapter(ChannelAdapter):
         """
         channel_data = {
             "type": "message",
-            "text": f"❌ **Error:** {error_message}",
+            "text": f"**Error:** {error_message}",
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         
@@ -558,7 +556,7 @@ class TeamsChannelAdapter(ChannelAdapter):
                 channel_data["channelData"]["error_code"] = error_code
         
         response = ChannelResponse(
-            message=f"❌ Error: {error_message}",
+            message=f"Error: {error_message}",
             channel_data=channel_data,
             correlation_id=correlation_id
         )
@@ -614,14 +612,14 @@ class WebChannelAdapter(ChannelAdapter):
             # Determine execution mode from environment or request
             execution_mode_str = (
                 body.get("executionMode") or
-                raw_request.get("executionMode", "LOCAL_MOCK")
+                raw_request.get("executionMode", "SANDBOX_LIVE")
             )
             
             try:
                 execution_mode = ExecutionMode(execution_mode_str)
             except ValueError:
-                logger.warning(f"Invalid execution mode {execution_mode_str}, defaulting to LOCAL_MOCK")
-                execution_mode = ExecutionMode.LOCAL_MOCK
+                logger.warning(f"Invalid execution mode {execution_mode_str}, defaulting to SANDBOX_LIVE")
+                execution_mode = ExecutionMode.SANDBOX_LIVE
             
             # Create internal message
             internal_message = InternalMessage(
@@ -698,7 +696,7 @@ class WebChannelAdapter(ChannelAdapter):
     def format_approval_card(
         self,
         approval_request: ApprovalRequest,
-        execution_mode: ExecutionMode = ExecutionMode.DRY_RUN
+        execution_mode: ExecutionMode = ExecutionMode.SANDBOX_LIVE
     ) -> ChannelResponse:
         """
         Format approval request as interactive web card
@@ -728,8 +726,6 @@ class WebChannelAdapter(ChannelAdapter):
         
         # Determine action description based on execution mode
         mode_descriptions = {
-            ExecutionMode.LOCAL_MOCK: "SIMULATE",
-            ExecutionMode.DRY_RUN: "SIMULATE (dry-run)",
             ExecutionMode.SANDBOX_LIVE: "EXECUTE"
         }
         mode_description = mode_descriptions.get(execution_mode, "EXECUTE")
@@ -792,7 +788,7 @@ class WebChannelAdapter(ChannelAdapter):
                 }
             ],
             "metadata": {
-                "requested_by": approval_request.requested_by,
+                "requested_by": approval_request.user_id,
                 "created_at": datetime.utcnow().isoformat() + "Z",
                 "format_version": "1.0"
             }
@@ -800,7 +796,7 @@ class WebChannelAdapter(ChannelAdapter):
         
         # Create the response message
         message = (
-            f"🔐 **Approval Required**\n\n"
+            f"**Approval Required**\n\n"
             f"**Operation:** {tool_call.tool_name}\n"
             f"**Mode:** {mode_description}\n"
             f"**Risk Level:** {risk_style['icon']} {approval_request.risk_level.upper()}\n"
@@ -887,7 +883,7 @@ class WebChannelAdapter(ChannelAdapter):
             channel_data["correlation_id"] = correlation_id
         
         response = ChannelResponse(
-            message=f"❌ Error: {error_message}",
+            message=f"Error: {error_message}",
             channel_data=channel_data,
             correlation_id=correlation_id
         )
@@ -912,16 +908,16 @@ class WebChannelAdapter(ChannelAdapter):
         aws_status = status_data.get("aws_tool_access_status", "unknown")
         
         status_emoji = {
-            "configured": "✅",
-            "not_configured": "⚠️",
-            "error": "❌"
+            "configured": "OK",
+            "not_configured": "WARNING",
+            "error": "ERROR"
         }
         
         message = (
-            f"🤖 **OpsAgent Controller Status**\n\n"
+            f"**OpsAgent Controller Status**\n\n"
             f"**Execution Mode:** {execution_mode}\n"
-            f"**LLM Provider:** {status_emoji.get(llm_status, '❓')} {llm_status}\n"
-            f"**AWS Tools:** {status_emoji.get(aws_status, '❓')} {aws_status}\n"
+            f"**LLM Provider:** {status_emoji.get(llm_status, 'UNKNOWN')} {llm_status}\n"
+            f"**AWS Tools:** {status_emoji.get(aws_status, 'UNKNOWN')} {aws_status}\n"
             f"**Environment:** {status_data.get('environment', 'unknown')}\n"
             f"**Version:** {status_data.get('version', 'unknown')}"
         )

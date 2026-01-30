@@ -1,0 +1,177 @@
+# OpsAgent Controller - Sandbox Environment Configuration
+
+# Environment Settings
+environment: sandbox
+execution_mode: SANDBOX_LIVE  # Options: LOCAL_MOCK, DRY_RUN, SANDBOX_LIVE
+
+# AWS Configuration
+aws:
+  region: us-east-1
+  account_id: "123456789012"  # Replace with your AWS account ID
+
+# API Gateway Configuration
+api_gateway:
+  stage_name: sandbox
+  throttling:
+    rate_limit: 100
+    burst_limit: 200
+  cors:
+    allow_origins: ["*"]
+    allow_methods: ["GET", "POST", "OPTIONS"]
+    allow_headers: ["Content-Type", "X-Amz-Date", "Authorization", "X-Api-Key", "X-Amz-Security-Token"]
+
+# Lambda Configuration
+lambda:
+  memory_size: 512
+  timeout: 30
+  runtime: python3.11
+  environment_variables:
+    EXECUTION_MODE: SANDBOX_LIVE
+    ENVIRONMENT: sandbox
+    LLM_PROVIDER: bedrock
+    BEDROCK_MODEL_ID: anthropic.claude-3-sonnet-20240229-v1:0
+
+# DynamoDB Configuration
+dynamodb:
+  billing_mode: PAY_PER_REQUEST
+  encryption:
+    enabled: true
+    kms_key: alias/opsagent-sandbox
+  point_in_time_recovery: true
+  ttl:
+    audit_logs: 7776000  # 90 days in seconds
+    incidents: 31536000  # 365 days in seconds
+
+# CloudWatch Configuration
+cloudwatch:
+  log_retention_days: 30
+  metrics_enabled: true
+  tracing_enabled: true
+
+# Security Configuration
+security:
+  api_key_rotation_days: 90
+  approval_token_expiry_minutes: 15
+  allowed_users:
+    - "platform-engineer@company.com"
+    - "ops-engineer@company.com"
+    - "sandbox-user@company.com"
+  
+  # Resource tagging requirements
+  required_tags:
+    write_operations:
+      - key: "OpsAgentManaged"
+        value: "true"
+    
+  # IAM permissions (least privilege)
+  iam_permissions:
+    diagnostic:
+      - "ec2:DescribeInstances"
+      - "ec2:DescribeInstanceStatus"
+      - "cloudwatch:GetMetricStatistics"
+      - "cloudwatch:ListMetrics"
+      - "elasticloadbalancing:DescribeTargetHealth"
+      - "cloudtrail:LookupEvents"
+    write:
+      - "ec2:RebootInstances"
+      - "ecs:UpdateService"
+    workflow:
+      - "dynamodb:PutItem"
+      - "sns:Publish"
+
+# Test Resources Configuration
+test_resources:
+  create_test_instance: true
+  instance_type: t3.micro
+  vpc_id: "vpc-084537f64f2a1ea5d"  # Replace with your VPC ID
+  subnet_id: "subnet-023cf72072982239e"  # Replace with your subnet ID
+  
+  # Test instance tags
+  tags:
+    Name: "opsagent-test-instance-sandbox"
+    Environment: sandbox
+    OpsAgentManaged: "true"
+    Project: OpsAgent
+
+# Amazon Q Business Integration
+amazon_q:
+  enabled: false  # Set to true if using Amazon Q Business integration
+  app_id: ""  # Amazon Q Business Application ID
+  user_id: "opsagent-user"
+  session_id: ""
+
+# Monitoring and Alerting
+monitoring:
+  cloudwatch_alarms:
+    enabled: true
+    error_rate_threshold: 5  # Percentage
+    latency_threshold: 10000  # Milliseconds
+    
+  notifications:
+    sns_topic: "opsagent-notifications-sandbox"
+    email_endpoints:
+      - "platform-team@company.com"
+
+# Plugin Configuration for Amazon Q Business
+plugin:
+  name: "OpsAgent Actions"
+  description: "Secure AWS operations for platform engineers"
+  version: "1.0.0"
+  
+  # Operations configuration
+  operations:
+    diagnostic:
+      - get_ec2_status
+      - get_cloudwatch_metrics
+      - describe_alb_target_health
+      - search_cloudtrail_events
+    write:
+      - reboot_ec2
+      - scale_ecs_service
+    workflow:
+      - create_incident_record
+      - post_summary_to_channel
+  
+  # Rate limiting
+  rate_limits:
+    requests_per_minute: 60
+    requests_per_hour: 1000
+    burst_capacity: 10
+
+# Deployment Configuration
+deployment:
+  stack_name: "opsagent-controller-sandbox"
+  template_file: "template.yaml"
+  parameter_overrides:
+    Environment: sandbox
+    ExecutionMode: SANDBOX_LIVE
+    CreateTestResources: "true"
+    EnableDynamoDBEncryption: "true"
+  
+  # Post-deployment steps
+  post_deployment:
+    - name: "Update API Key"
+      command: "aws ssm put-parameter --name /opsagent/api-key --value CHANGE_ME --type SecureString --overwrite"
+    - name: "Configure User Allow-list"
+      command: "aws ssm put-parameter --name /opsagent/allowed-users --value 'platform-engineer@company.com,ops-engineer@company.com' --type StringList --overwrite"
+    - name: "Test Health Endpoint"
+      command: "curl -f https://API_ENDPOINT/health"
+
+# Validation Rules
+validation:
+  required_parameters:
+    - Environment
+    - ExecutionMode
+    - aws.account_id
+    - test_resources.vpc_id
+    - test_resources.subnet_id
+  
+  execution_mode_constraints:
+    sandbox:
+      allowed_modes: [LOCAL_MOCK, DRY_RUN, SANDBOX_LIVE]
+      default_mode: SANDBOX_LIVE
+  
+  resource_constraints:
+    max_lambda_memory: 1024
+    max_lambda_timeout: 60
+    max_api_rate_limit: 1000

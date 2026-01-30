@@ -1,18 +1,16 @@
 # OpsAgent Controller Deployment Guide
 
-## Overview
-
-This guide provides comprehensive instructions for deploying the OpsAgent Controller across different environments (sandbox, staging, production) with proper configuration management and security controls.
+This comprehensive guide covers deploying the OpsAgent Controller infrastructure across different environments, from initial setup to production deployment.
 
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
-2. [Environment Overview](#environment-overview)
-3. [Quick Start](#quick-start)
-4. [Detailed Deployment](#detailed-deployment)
+2. [Quick Start](#quick-start)
+3. [Environment Setup](#environment-setup)
+4. [Deployment Process](#deployment-process)
 5. [Configuration Management](#configuration-management)
-6. [Security Setup](#security-setup)
-7. [Testing and Validation](#testing-and-validation)
+6. [Amazon Q Business Integration](#amazon-q-business-integration)
+7. [Validation and Testing](#validation-and-testing)
 8. [Troubleshooting](#troubleshooting)
 9. [Maintenance](#maintenance)
 
@@ -20,704 +18,621 @@ This guide provides comprehensive instructions for deploying the OpsAgent Contro
 
 ### Required Tools
 
-- **AWS CLI** (v2.0+) - configured with appropriate credentials
-- **AWS SAM CLI** (v1.50+) - for serverless application deployment
-- **jq** - for JSON processing in scripts
-- **curl** - for testing endpoints
-- **openssl** - for generating secure keys
+1. **AWS CLI v2.x**
+   ```bash
+   # Install AWS CLI
+   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+   unzip awscliv2.zip
+   sudo ./aws/install
+   
+   # Verify installation
+   aws --version
+   ```
 
-### AWS Account Requirements
+2. **SAM CLI v1.x**
+   ```bash
+   # Install SAM CLI
+   pip install aws-sam-cli
+   
+   # Verify installation
+   sam --version
+   ```
 
-- **IAM Permissions**: CloudFormation, Lambda, API Gateway, IAM, KMS, SSM, DynamoDB, CloudWatch
-- **Service Limits**: Ensure sufficient limits for Lambda functions and API Gateway
-- **Bedrock Access**: If using Bedrock, ensure model access is enabled in your region
+3. **Python 3.11**
+   ```bash
+   # Verify Python version
+   python3 --version
+   ```
 
-### Installation Commands
+4. **jq (for JSON processing)**
+   ```bash
+   # Install jq
+   sudo apt-get install jq  # Ubuntu/Debian
+   brew install jq          # macOS
+   ```
 
-```bash
-# Install AWS CLI
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
-sudo ./aws/install
+### AWS Account Setup
 
-# Install SAM CLI
-pip install aws-sam-cli
+1. **AWS Credentials**
+   ```bash
+   # Configure AWS credentials
+   aws configure
+   
+   # Or use environment variables
+   export AWS_ACCESS_KEY_ID=your-access-key
+   export AWS_SECRET_ACCESS_KEY=your-secret-key
+   export AWS_DEFAULT_REGION=us-east-1
+   ```
 
-# Install jq (Ubuntu/Debian)
-sudo apt-get install jq
+2. **Required Permissions**
+   
+   Your AWS user/role needs the following permissions:
+   - CloudFormation: Full access
+   - Lambda: Full access
+   - API Gateway: Full access
+   - DynamoDB: Full access
+   - IAM: Create/manage roles and policies
+   - CloudWatch: Create log groups and metrics
+   - SSM: Parameter Store access
+   - SNS: Topic creation and publishing
+   - KMS: Key creation and management
+   - S3: Bucket creation for SAM deployments
 
-# Install jq (macOS)
-brew install jq
-```
-
-## Environment Overview
-
-### Sandbox Environment
-- **Purpose**: Development and testing
-- **Execution Mode**: LOCAL_MOCK or DRY_RUN
-- **Resources**: Minimal, cost-optimized
-- **Security**: Relaxed for development
-
-### Staging Environment
-- **Purpose**: Pre-production testing
-- **Execution Mode**: DRY_RUN or SANDBOX_LIVE
-- **Resources**: Production-like but smaller scale
-- **Security**: Production-like controls
-
-### Production Environment
-- **Purpose**: Live operations
-- **Execution Mode**: SANDBOX_LIVE
-- **Resources**: Full scale with redundancy
-- **Security**: Maximum security controls
+3. **Service Limits**
+   
+   Verify your account has sufficient limits:
+   - Lambda concurrent executions: 100+
+   - API Gateway requests per second: 1000+
+   - DynamoDB read/write capacity: Auto-scaling enabled
+   - CloudWatch log retention: 90+ days
 
 ## Quick Start
 
-### 1. Clone and Setup
+For a rapid sandbox deployment:
+
 ```bash
+# Clone the repository
 git clone <repository-url>
 cd ops-agent-controller
-chmod +x infrastructure/*.sh
+
+# Deploy to sandbox
+./infrastructure/deploy.sh --environment sandbox
+
+# Configure the deployment
+./infrastructure/configure.sh init --environment sandbox
+
+# Validate the deployment
+./infrastructure/configure.sh validate --environment sandbox
 ```
 
-### 2. Deploy Sandbox Environment
+## Environment Setup
+
+### Sandbox Environment
+
+**Purpose**: Development, testing, and experimentation
+
+**Configuration**:
 ```bash
-# Deploy with defaults
-./infrastructure/deploy-environment.sh sandbox
-
-# Or with custom settings
-./infrastructure/deploy-environment.sh sandbox \
-    --region us-west-2 \
-    --execution-mode DRY_RUN
+# Deploy sandbox environment
+./infrastructure/deploy.sh \
+  --environment sandbox \
+  --execution-mode SANDBOX_LIVE \
+  --test-resources true \
+  --region us-east-1
 ```
 
-### 3. Configure Credentials
+**Characteristics**:
+- Test resources created automatically
+- Relaxed security policies
+- Extended logging for debugging
+- Lower rate limits
+- Cost-optimized settings
+
+### Staging Environment
+
+**Purpose**: Pre-production validation and integration testing
+
+**Configuration**:
 ```bash
-./infrastructure/configure-environment.sh setup-credentials sandbox
+# Deploy staging environment
+./infrastructure/deploy.sh \
+  --environment staging \
+  --execution-mode SANDBOX_LIVE \
+  --test-resources false \
+  --region us-east-1
 ```
 
-### 4. Test Deployment
+**Characteristics**:
+- Production-like configuration
+- No test resources
+- Moderate security policies
+- Performance monitoring enabled
+- Limited user access
+
+### Production Environment
+
+**Purpose**: Live operational environment
+
+**Configuration**:
 ```bash
-./infrastructure/configure-environment.sh validate-config sandbox
+# Deploy production environment (requires approval)
+./infrastructure/deploy.sh \
+  --environment production \
+  --execution-mode SANDBOX_LIVE \
+  --test-resources false \
+  --encryption true \
+  --region us-east-1
 ```
-## Detailed Deployment
 
-### Environment-Specific Deployment
+**Characteristics**:
+- Maximum security settings
+- Encryption at rest and in transit
+- Comprehensive monitoring
+- Strict access controls
+- High availability configuration
 
-#### Sandbox Deployment
+## Deployment Process
+
+### Step 1: Pre-Deployment Checklist
+
+- [ ] AWS credentials configured
+- [ ] Required tools installed
+- [ ] Target environment determined
+- [ ] Network configuration reviewed
+- [ ] Security requirements understood
+- [ ] Change management approval (production)
+
+### Step 2: Infrastructure Deployment
+
+#### Option A: Automated Deployment (Recommended)
+
 ```bash
-# Basic sandbox deployment
-./infrastructure/deploy-environment.sh sandbox
-
-# Sandbox with custom configuration
-./infrastructure/deploy-environment.sh sandbox \
-    --region us-east-1 \
-    --execution-mode LOCAL_MOCK \
-    --llm-provider bedrock \
-    --api-key "your-secure-api-key"
+# Use the deployment script
+./infrastructure/deploy.sh --environment <environment>
 ```
 
-#### Staging Deployment
-```bash
-# Staging deployment with dry-run mode
-./infrastructure/deploy-environment.sh staging \
-    --region us-west-2 \
-    --execution-mode DRY_RUN \
-    --llm-provider bedrock
-```
-
-#### Production Deployment
-```bash
-# Production deployment with live execution
-./infrastructure/deploy-environment.sh production \
-    --region us-east-1 \
-    --execution-mode SANDBOX_LIVE \
-    --llm-provider bedrock
-```
-
-### Manual Deployment with SAM
-
-If you prefer manual control over the deployment process:
+#### Option B: Manual SAM Deployment
 
 ```bash
 # Navigate to infrastructure directory
 cd infrastructure
 
-# Validate template
-sam validate --template-file template.yaml
+# Build the application
+sam build
 
-# Build application
-sam build --template-file template.yaml
-
-# Deploy with guided setup
+# Deploy with guided setup (first time)
 sam deploy --guided
 
-# Or deploy with specific parameters
+# Or deploy with parameters
 sam deploy \
-    --stack-name opsagent-controller-sandbox \
-    --capabilities CAPABILITY_NAMED_IAM \
-    --parameter-overrides \
-        Environment=sandbox \
-        ExecutionMode=LOCAL_MOCK \
-        LLMProvider=bedrock \
-        CreateTestResources=true
+  --template-file .aws-sam/build/template.yaml \
+  --stack-name opsagent-controller-sandbox \
+  --s3-bucket your-deployment-bucket \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    Environment=sandbox \
+    ExecutionMode=SANDBOX_LIVE \
+    CreateTestResources=true
 ```
 
-### Deployment Parameters
+### Step 3: Post-Deployment Configuration
 
-| Parameter | Description | Default | Options |
-|-----------|-------------|---------|---------|
-| `Environment` | Deployment environment | `sandbox` | `sandbox`, `staging`, `production` |
-| `ExecutionMode` | OpsAgent execution mode | `LOCAL_MOCK` | `LOCAL_MOCK`, `DRY_RUN`, `SANDBOX_LIVE` |
-| `LLMProvider` | LLM provider to use | `bedrock` | `bedrock`, `openai`, `azure_openai` |
-| `BedrockModelId` | Bedrock model identifier | `anthropic.claude-3-sonnet-20240229-v1:0` | Any supported Bedrock model |
-| `EnableDynamoDBEncryption` | Enable DynamoDB encryption | `true` | `true`, `false` |
-| `CreateTestResources` | Create test EC2 instance | `true` | `true`, `false` |
+```bash
+# Initialize configuration
+./infrastructure/configure.sh init --environment <environment>
+
+# Validate deployment
+./infrastructure/configure.sh validate --environment <environment>
+
+# View configuration
+./infrastructure/configure.sh show --environment <environment>
+```
+
+### Step 4: Amazon Q Business Integration
+
+1. **Retrieve API Configuration**
+   ```bash
+   # Get API endpoint
+   aws cloudformation describe-stacks \
+     --stack-name opsagent-controller-<environment> \
+     --query 'Stacks[0].Outputs[?OutputKey==`PluginApiEndpointUrl`].OutputValue' \
+     --output text
+   
+   # Get API key
+   aws ssm get-parameter \
+     --name "/opsagent/plugin-api-key-<environment>" \
+     --with-decryption \
+     --query 'Parameter.Value' \
+     --output text
+   ```
+
+2. **Create Amazon Q Business Plugin**
+   - Use `infrastructure/amazon-q-plugin-schema.yaml`
+   - Configure with API endpoint and key
+   - Follow `docs/amazon-q-plugin-setup.md`
+
+### Step 5: Validation and Testing
+
+```bash
+# Run validation tests
+python infrastructure/validate_plugin.py <api_endpoint> <api_key>
+
+# Test health endpoint
+curl -f https://<api_endpoint>/health
+
+# Test diagnostic operation
+curl -X POST https://<api_endpoint>/operations/diagnostic \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <api_key>" \
+  -d '{
+    "operation": "get_ec2_status",
+    "parameters": {"instance_id": "i-1234567890abcdef0"},
+    "user_context": {"user_id": "test@company.com"}
+  }'
+```
 
 ## Configuration Management
 
-### Setting Up Credentials
+### Execution Modes
 
-#### AWS and API Key Setup
+Change execution mode based on your needs:
+
 ```bash
-# Interactive credential setup
-./infrastructure/configure-environment.sh setup-credentials sandbox
+# Set to dry-run mode for testing
+./infrastructure/configure.sh set-mode --environment sandbox DRY_RUN
 
-# Manual API key setup
-aws ssm put-parameter \
-    --name "/opsagent/sandbox/api-key" \
-    --value "your-secure-api-key" \
-    --type SecureString \
-    --overwrite
+# Set to live mode for actual operations
+./infrastructure/configure.sh set-mode --environment sandbox SANDBOX_LIVE
+
+# Mock mode for development (not production)
+./infrastructure/configure.sh set-mode --environment sandbox LOCAL_MOCK
 ```
 
-#### LLM Provider Configuration
+### User Management
 
-**For Bedrock (Recommended):**
+Update the user allow-list:
+
 ```bash
-# Ensure Bedrock model access is enabled
-aws bedrock list-foundation-models --region us-east-1
+# Update allowed users
+./infrastructure/configure.sh update-users --environment sandbox \
+  "user1@company.com,user2@company.com,user3@company.com"
 
-# No additional credentials needed
+# View current users
+aws ssm get-parameter \
+  --name "/opsagent/allowed-users" \
+  --query 'Parameter.Value' \
+  --output text
 ```
 
-**For OpenAI:**
+### API Key Rotation
+
+Rotate API keys regularly:
+
 ```bash
-# Store OpenAI API key
-aws ssm put-parameter \
-    --name "/opsagent/sandbox/openai-api-key" \
-    --value "sk-your-openai-key" \
-    --type SecureString \
-    --overwrite
+# Rotate API keys
+./infrastructure/configure.sh rotate-keys --environment sandbox
+
+# Get new API key for plugin update
+aws ssm get-parameter \
+  --name "/opsagent/plugin-api-key-sandbox" \
+  --with-decryption \
+  --query 'Parameter.Value' \
+  --output text
 ```
 
-**For Azure OpenAI:**
-```bash
-# Store Azure OpenAI credentials
-aws ssm put-parameter \
-    --name "/opsagent/sandbox/azure-openai-api-key" \
-    --value "your-azure-key" \
-    --type SecureString \
-    --overwrite
+## Amazon Q Business Integration
 
-aws ssm put-parameter \
-    --name "/opsagent/sandbox/azure-openai-endpoint" \
-    --value "https://your-resource.openai.azure.com/" \
-    --type String \
-    --overwrite
-```
+### Plugin Creation Process
 
-### Microsoft Teams Integration
-
-#### Prerequisites
-1. Microsoft 365 tenant with Teams enabled
-2. Azure subscription for Bot Service registration
-3. Appropriate permissions to create bot registrations
-
-#### Setup Process
-```bash
-# Interactive Teams setup
-./infrastructure/configure-environment.sh setup-teams production
-```
-
-#### Manual Teams Setup
-
-1. **Create Bot Registration in Azure Portal:**
-   - Go to https://portal.azure.com/#create/Microsoft.BotService
-   - Create a new Bot Service registration
-   - Note the App ID and generate an App Secret
-
-2. **Configure Bot Endpoint:**
+1. **Prepare OpenAPI Schema**
    ```bash
-   # Get the chat endpoint URL
-   CHAT_URL=$(aws cloudformation describe-stacks \
-       --stack-name opsagent-controller-production \
-       --query 'Stacks[0].Outputs[?OutputKey==`ChatEndpoint`].OutputValue' \
-       --output text)
-   
-   echo "Configure bot messaging endpoint to: $CHAT_URL"
+   # Update schema with your API endpoint
+   sed -i 's/${PLUGIN_API_ENDPOINT}/https:\/\/your-api-endpoint.com/g' \
+     infrastructure/amazon-q-plugin-schema.yaml
    ```
 
-3. **Store Teams Credentials:**
+2. **Create Plugin in Console**
+   - Navigate to Amazon Q Business Console
+   - Go to Plugins section
+   - Create new custom plugin
+   - Upload OpenAPI schema
+   - Configure authentication with API key
+
+3. **Test Plugin Integration**
    ```bash
-   aws ssm put-parameter \
-       --name "/opsagent/production/teams-bot-app-id" \
-       --value "your-bot-app-id" \
-       --type String \
-       --overwrite
-   
-   aws ssm put-parameter \
-       --name "/opsagent/production/teams-bot-app-secret" \
-       --value "your-bot-app-secret" \
-       --type SecureString \
-       --overwrite
+   # Test through Amazon Q Business chat
+   # Send message: "Get status of EC2 instance i-1234567890abcdef0"
    ```
 
-4. **Create Teams App Manifest:**
-   ```json
-   {
-     "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
-     "manifestVersion": "1.16",
-     "version": "1.0.0",
-     "id": "your-bot-app-id",
-     "packageName": "com.company.opsagent",
-     "developer": {
-       "name": "Your Company",
-       "websiteUrl": "https://your-company.com",
-       "privacyUrl": "https://your-company.com/privacy",
-       "termsOfUseUrl": "https://your-company.com/terms"
-     },
-     "name": {
-       "short": "OpsAgent",
-       "full": "OpsAgent Controller"
-     },
-     "description": {
-       "short": "Conversational Tier-1 Ops assistant",
-       "full": "OpsAgent Controller helps platform teams diagnose and remediate incidents through chat interfaces"
-     },
-     "icons": {
-       "outline": "outline.png",
-       "color": "color.png"
-     },
-     "accentColor": "#FFFFFF",
-     "bots": [
-       {
-         "botId": "your-bot-app-id",
-         "scopes": ["personal", "team"],
-         "commandLists": [
-           {
-             "scopes": ["personal", "team"],
-             "commands": [
-               {
-                 "title": "Check system status",
-                 "description": "Get overall system health status"
-               },
-               {
-                 "title": "Check CPU metrics",
-                 "description": "Get CPU utilization metrics"
-               }
-             ]
-           }
-         ]
-       }
-     ],
-     "permissions": ["identity", "messageTeamMembers"],
-     "validDomains": []
-   }
-   ```
+### Plugin Configuration Examples
 
-## Security Setup
-
-### IAM Permissions
-
-The deployment creates several IAM policies with least privilege access:
-
-#### Audit Logging Policy
-- CloudWatch Logs: CreateLogStream, PutLogEvents
-- DynamoDB: PutItem, GetItem, Query, UpdateItem
-- KMS: Encrypt, Decrypt, GenerateDataKey
-
-#### Diagnosis Tools Policy
-- CloudWatch: GetMetricStatistics, ListMetrics (read-only)
-- EC2: DescribeInstances, DescribeTags (read-only)
-- ECS/ALB: DescribeServices, DescribeLoadBalancers (read-only)
-
-#### Remediation Tools Policy
-- EC2: RebootInstances, StartInstances, StopInstances (tagged resources only)
-- Condition: `ec2:ResourceTag/OpsAgentManaged = true`
-
-#### LLM Provider Policy
-- Bedrock: InvokeModel (specific models only)
-- SSM: GetParameter (OpsAgent parameters only)
-- Secrets Manager: GetSecretValue (OpsAgent secrets only)
-
-### Encryption
-
-#### Data at Rest
-- **KMS Encryption**: All data encrypted with customer-managed KMS key
-- **CloudWatch Logs**: Encrypted with KMS key
-- **DynamoDB**: Encrypted with KMS key
-- **SSM Parameters**: SecureString type with KMS encryption
-
-#### Data in Transit
-- **API Gateway**: TLS 1.2+ enforced
-- **AWS Service Calls**: HTTPS only
-- **LLM Provider Calls**: TLS encryption
-
-### Network Security
-
-#### API Gateway Security
+#### Basic Plugin Setup
 ```yaml
-# CORS Configuration
-Cors:
-  AllowMethods: "'GET,POST,OPTIONS'"
-  AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
-  AllowOrigin: "'*'"  # Restrict in production
-  MaxAge: "'600'"
-
-# Rate Limiting
-MethodSettings:
-  - ThrottlingRateLimit: 100
-    ThrottlingBurstLimit: 200
+# Plugin configuration in Amazon Q Business
+name: "OpsAgent Actions"
+description: "Secure AWS operations for platform engineers"
+authentication:
+  type: "API_KEY"
+  location: "HEADER"
+  name: "X-API-Key"
+  value: "<your-api-key>"
 ```
 
-#### Lambda Security
-- **VPC**: Optional VPC deployment for network isolation
-- **Security Groups**: Restrictive egress rules
-- **Environment Variables**: No secrets in environment variables
-
-### Resource Tagging
-
-All resources are tagged for security and compliance:
-
+#### Advanced Plugin Settings
 ```yaml
-Tags:
-  Project: OpsAgent
-  Environment: !Ref Environment
-  Owner: Platform-Team
-  DeployedBy: !Ref AWS::AccountId
-  DeployedAt: !Ref AWS::StackId
+# Advanced configuration
+timeout: 30
+retry_attempts: 2
+rate_limiting:
+  requests_per_minute: 60
+  burst_capacity: 10
+security:
+  allowed_users: ["platform-team@company.com"]
+  require_approval: false  # Handled by plugin internally
 ```
 
-### Compliance Features
-
-#### SOC 2 Compliance
-- **Audit Logging**: Complete audit trail of all actions
-- **Access Controls**: Role-based access with least privilege
-- **Encryption**: Data encrypted at rest and in transit
-- **Monitoring**: CloudWatch metrics and alarms
-
-#### GDPR Compliance
-- **Data Retention**: DynamoDB TTL for automatic cleanup
-- **Data Minimization**: Only necessary data collected
-- **Right to Erasure**: Manual data deletion capabilities
-
-## Testing and Validation
+## Validation and Testing
 
 ### Automated Testing
 
-#### Infrastructure Validation
-```bash
-# Validate SAM template
-./infrastructure/validate.sh
+Run the comprehensive test suite:
 
-# Validate configuration
-./infrastructure/configure-environment.sh validate-config sandbox
+```bash
+# Full validation suite
+python infrastructure/validate_plugin.py \
+  https://your-api-endpoint.com \
+  your-api-key
+
+# Specific test categories
+python infrastructure/validate_plugin.py \
+  --tests health,auth,diagnostic \
+  https://your-api-endpoint.com \
+  your-api-key
 ```
 
-#### Smoke Tests
-```bash
-# Test health endpoint
-HEALTH_URL=$(aws cloudformation describe-stacks \
-    --stack-name opsagent-controller-sandbox \
-    --query 'Stacks[0].Outputs[?OutputKey==`HealthEndpoint`].OutputValue' \
-    --output text)
+### Manual Testing Checklist
 
-API_KEY=$(aws ssm get-parameter \
-    --name "/opsagent/sandbox/api-key" \
-    --with-decryption \
-    --query 'Parameter.Value' \
-    --output text)
+#### Health Check
+- [ ] Health endpoint returns 200 OK
+- [ ] All services show "ok" status
+- [ ] Response time < 5 seconds
 
-curl -H "X-API-Key: $API_KEY" "$HEALTH_URL"
-```
+#### Authentication
+- [ ] Requests without API key rejected (401)
+- [ ] Invalid API key rejected (401)
+- [ ] Unauthorized users rejected (403)
 
-#### Integration Tests
-```bash
-# Test chat endpoint
-CHAT_URL=$(aws cloudformation describe-stacks \
-    --stack-name opsagent-controller-sandbox \
-    --query 'Stacks[0].Outputs[?OutputKey==`ChatEndpoint`].OutputValue' \
-    --output text)
+#### Diagnostic Operations
+- [ ] get_ec2_status works correctly
+- [ ] get_cloudwatch_metrics returns data
+- [ ] describe_alb_target_health shows status
+- [ ] search_cloudtrail_events finds events
 
-curl -X POST \
-    -H "Content-Type: application/json" \
-    -H "X-API-Key: $API_KEY" \
-    -d '{"userId":"test-user","messageText":"Check system status","channel":"web"}' \
-    "$CHAT_URL"
-```
+#### Approval Workflow
+- [ ] Propose action generates token
+- [ ] Approve action executes successfully
+- [ ] Token expiration enforced (15 minutes)
+- [ ] Resource tagging validated
 
-### Manual Testing
-
-#### Test Scenarios
-
-1. **Health Check Test**
-   - Verify health endpoint returns 200
-   - Check execution mode is correct
-   - Validate LLM provider status
-
-2. **Authentication Test**
-   - Test with valid API key
-   - Test with invalid API key
-   - Test with missing API key
-
-3. **Diagnosis Tools Test**
-   - Request CloudWatch metrics
-   - Request EC2 instance information
-   - Verify read-only operations
-
-4. **Approval Gate Test**
-   - Request remediation action
-   - Verify approval prompt is returned
-   - Test approval token validation
-
-5. **Audit Logging Test**
-   - Verify all actions are logged
-   - Check correlation IDs are present
-   - Validate no secrets in logs
+#### Workflow Operations
+- [ ] Incident records created
+- [ ] Channel notifications sent
+- [ ] Audit logs generated
 
 ### Performance Testing
 
-#### Load Testing
 ```bash
-# Simple load test with curl
-for i in {1..100}; do
-    curl -s -H "X-API-Key: $API_KEY" "$HEALTH_URL" &
-done
-wait
-```
+# Load testing with Apache Bench
+ab -n 100 -c 10 -H "X-API-Key: your-api-key" \
+  https://your-api-endpoint.com/health
 
-#### Monitoring
-- **CloudWatch Metrics**: Lambda duration, error rate, throttles
-- **API Gateway Metrics**: Request count, latency, 4xx/5xx errors
-- **Custom Metrics**: Business logic metrics
+# Monitor CloudWatch metrics during testing
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Duration \
+  --dimensions Name=FunctionName,Value=opsagent-controller-sandbox \
+  --start-time 2024-01-15T10:00:00Z \
+  --end-time 2024-01-15T11:00:00Z \
+  --period 300 \
+  --statistics Average,Maximum
+```
 
 ## Troubleshooting
 
 ### Common Issues
 
-#### 1. "LLM provider not configured"
-**Symptoms**: Health endpoint shows LLM provider as not configured
-**Solutions**:
-- Verify Bedrock model access is enabled
-- Check IAM permissions for `bedrock:InvokeModel`
-- Validate model ID in parameters
+#### Deployment Failures
 
-#### 2. "AWS tool access error"
-**Symptoms**: Diagnosis tools fail with permission errors
-**Solutions**:
-- Check IAM permissions for CloudWatch and EC2
-- Verify correct AWS region
-- Test with AWS CLI directly
-
-#### 3. "Authentication failed"
-**Symptoms**: API returns 401 or 403 errors
-**Solutions**:
-- Update API key in SSM Parameter Store
-- Check header format: `X-API-Key: your-key`
-- Verify parameter name matches environment
-
-#### 4. "Rate limit exceeded"
-**Symptoms**: API returns 429 errors
-**Solutions**:
-- Check API Gateway throttling settings
-- Implement client-side rate limiting
-- Consider increasing limits for production
-
-#### 5. "Stack deployment failed"
-**Symptoms**: CloudFormation deployment errors
-**Solutions**:
-- Check IAM permissions for CloudFormation
-- Verify resource limits and quotas
-- Review CloudFormation events for specific errors
-
-### Debugging Commands
-
-#### Check Stack Status
+**Issue**: SAM build fails
 ```bash
-aws cloudformation describe-stacks \
-    --stack-name opsagent-controller-sandbox \
-    --query 'Stacks[0].StackStatus'
+# Solution: Check Python dependencies
+pip install -r src/requirements.txt
+
+# Verify Python version
+python3 --version  # Should be 3.11+
 ```
 
-#### View Stack Events
+**Issue**: CloudFormation stack creation fails
 ```bash
+# Check stack events
 aws cloudformation describe-stack-events \
-    --stack-name opsagent-controller-sandbox \
-    --query 'StackEvents[*].[Timestamp,ResourceStatus,ResourceStatusReason]' \
-    --output table
+  --stack-name opsagent-controller-sandbox
+
+# Common causes:
+# - Insufficient IAM permissions
+# - Resource limits exceeded
+# - Invalid parameter values
 ```
 
-#### Check Lambda Logs
+#### Runtime Issues
+
+**Issue**: Lambda function timeouts
 ```bash
+# Check CloudWatch logs
 aws logs tail /aws/lambda/opsagent-controller-sandbox --follow
+
+# Increase memory/timeout if needed
+aws lambda update-function-configuration \
+  --function-name opsagent-controller-sandbox \
+  --memory-size 1024 \
+  --timeout 60
 ```
 
-#### Check Parameter Store
+**Issue**: API Gateway 5xx errors
 ```bash
-aws ssm get-parameters-by-path \
-    --path "/opsagent/sandbox/" \
-    --query 'Parameters[*].[Name,Type]' \
-    --output table
+# Check API Gateway logs
+aws logs tail /aws/apigateway/opsagent-sandbox --follow
+
+# Common causes:
+# - Lambda function errors
+# - Integration configuration issues
+# - Rate limiting
 ```
 
-### Log Analysis
+#### Authentication Issues
 
-#### CloudWatch Insights Queries
+**Issue**: API key not working
+```bash
+# Verify API key exists
+aws ssm get-parameter --name "/opsagent/plugin-api-key-sandbox"
 
-**Error Analysis:**
-```sql
-fields @timestamp, @message
-| filter @message like /ERROR/
-| sort @timestamp desc
-| limit 100
+# Check API Gateway usage plan
+aws apigateway get-usage-plans
 ```
 
-**Performance Analysis:**
-```sql
-fields @timestamp, @duration, @requestId
-| filter @type = "REPORT"
-| stats avg(@duration), max(@duration), min(@duration) by bin(5m)
+**Issue**: User authorization failures
+```bash
+# Check user allow-list
+aws ssm get-parameter --name "/opsagent/allowed-users"
+
+# Verify user email format
+# Must match exactly with Amazon Q Business user ID
 ```
 
-**Audit Trail:**
-```sql
-fields @timestamp, correlationId, userId, action, outcome
-| filter @message like /AUDIT/
-| sort @timestamp desc
-| limit 100
+### Debug Mode
+
+Enable debug logging:
+
+```bash
+# Update Lambda environment variables
+aws lambda update-function-configuration \
+  --function-name opsagent-controller-sandbox \
+  --environment Variables='{
+    "EXECUTION_MODE": "SANDBOX_LIVE",
+    "LOG_LEVEL": "DEBUG",
+    "ENVIRONMENT": "sandbox"
+  }'
 ```
+
+### Support Resources
+
+- **CloudWatch Logs**: `/aws/lambda/opsagent-controller-<environment>`
+- **API Gateway Logs**: `/aws/apigateway/opsagent-<environment>`
+- **DynamoDB Audit Table**: `opsagent-audit-<environment>`
+- **SNS Topic**: `opsagent-notifications-<environment>`
 
 ## Maintenance
 
-### Regular Maintenance Tasks
+### Regular Tasks
 
-#### Weekly Tasks
-1. **Review CloudWatch Logs** for errors and warnings
-2. **Check API Gateway metrics** for performance issues
-3. **Validate backup and recovery** procedures
-4. **Review security alerts** and recommendations
+#### Weekly
+- [ ] Review CloudWatch metrics and alarms
+- [ ] Check audit logs for anomalies
+- [ ] Verify backup integrity
+- [ ] Update user access if needed
 
-#### Monthly Tasks
-1. **Update dependencies** and security patches
-2. **Review IAM permissions** and access patterns
-3. **Analyze cost optimization** opportunities
-4. **Test disaster recovery** procedures
+#### Monthly
+- [ ] Rotate API keys
+- [ ] Review and update user allow-lists
+- [ ] Check for AWS service updates
+- [ ] Performance optimization review
 
-#### Quarterly Tasks
-1. **Security audit** and penetration testing
-2. **Performance optimization** review
-3. **Capacity planning** and scaling review
-4. **Documentation updates** and training
+#### Quarterly
+- [ ] Security review and penetration testing
+- [ ] Disaster recovery testing
+- [ ] Cost optimization review
+- [ ] Documentation updates
+
+### Monitoring Setup
+
+```bash
+# Create CloudWatch alarms
+aws cloudwatch put-metric-alarm \
+  --alarm-name "OpsAgent-HighErrorRate" \
+  --alarm-description "High error rate in OpsAgent Controller" \
+  --metric-name Errors \
+  --namespace AWS/Lambda \
+  --statistic Sum \
+  --period 300 \
+  --threshold 5 \
+  --comparison-operator GreaterThanThreshold \
+  --dimensions Name=FunctionName,Value=opsagent-controller-sandbox \
+  --evaluation-periods 2
+
+# Set up SNS notifications
+aws sns subscribe \
+  --topic-arn arn:aws:sns:us-east-1:123456789012:opsagent-notifications-sandbox \
+  --protocol email \
+  --notification-endpoint platform-team@company.com
+```
 
 ### Backup and Recovery
 
-#### Configuration Backup
 ```bash
-# Export configuration
-./infrastructure/configure-environment.sh export-config production \
-    --file "backup-prod-$(date +%Y%m%d).json"
+# Backup configuration
+./infrastructure/configure.sh backup --environment production
 
-# Store backup securely
-aws s3 cp "backup-prod-$(date +%Y%m%d).json" \
-    s3://your-backup-bucket/opsagent/configs/
+# Export CloudFormation template
+aws cloudformation get-template \
+  --stack-name opsagent-controller-production \
+  --template-stage Processed > backup/template-$(date +%Y%m%d).json
+
+# Backup DynamoDB tables
+aws dynamodb create-backup \
+  --table-name opsagent-audit-production \
+  --backup-name opsagent-audit-backup-$(date +%Y%m%d)
 ```
 
-#### Disaster Recovery
+### Updates and Upgrades
+
 ```bash
-# Restore from backup
-./infrastructure/configure-environment.sh import-config production \
-    --file "backup-prod-20240101.json"
+# Update to new version
+git pull origin main
 
-# Redeploy infrastructure
-./infrastructure/deploy-environment.sh production --validate-only
-./infrastructure/deploy-environment.sh production
+# Deploy updates
+./infrastructure/deploy.sh --environment sandbox
+
+# Validate updates
+./infrastructure/configure.sh validate --environment sandbox
+
+# Promote to production (after testing)
+./infrastructure/deploy.sh --environment production
 ```
 
-### Monitoring and Alerting
+## Security Best Practices
 
-#### CloudWatch Alarms
-```bash
-# Create error rate alarm
-aws cloudwatch put-metric-alarm \
-    --alarm-name "OpsAgent-ErrorRate-High" \
-    --alarm-description "OpsAgent error rate is high" \
-    --metric-name "Errors" \
-    --namespace "AWS/Lambda" \
-    --statistic "Sum" \
-    --period 300 \
-    --threshold 10 \
-    --comparison-operator "GreaterThanThreshold" \
-    --dimensions Name=FunctionName,Value=opsagent-controller-production \
-    --evaluation-periods 2
-```
+### Access Control
+- Use least-privilege IAM policies
+- Regularly review user access
+- Enable MFA for administrative access
+- Implement IP restrictions where possible
 
-#### Custom Metrics
-```python
-# In Lambda function
-import boto3
-cloudwatch = boto3.client('cloudwatch')
+### Data Protection
+- Enable encryption at rest and in transit
+- Rotate keys regularly
+- Sanitize logs to prevent data leakage
+- Implement data retention policies
 
-cloudwatch.put_metric_data(
-    Namespace='OpsAgent/Controller',
-    MetricData=[
-        {
-            'MetricName': 'SuccessfulRequests',
-            'Value': 1,
-            'Unit': 'Count',
-            'Dimensions': [
-                {
-                    'Name': 'Environment',
-                    'Value': os.environ['ENVIRONMENT']
-                }
-            ]
-        }
-    ]
-)
-```
+### Monitoring
+- Enable CloudTrail for API calls
+- Monitor for unusual access patterns
+- Set up alerts for security events
+- Regular security assessments
 
-### Cost Optimization
+### Compliance
+- Maintain audit trails for 90+ days
+- Document all configuration changes
+- Regular compliance reviews
+- Incident response procedures
 
-#### Cost Monitoring
-```bash
-# Get cost and usage data
-aws ce get-cost-and-usage \
-    --time-period Start=2024-01-01,End=2024-01-31 \
-    --granularity MONTHLY \
-    --metrics BlendedCost \
-    --group-by Type=DIMENSION,Key=SERVICE
-```
-
-#### Optimization Strategies
-1. **Lambda Memory Optimization**: Monitor and adjust based on usage
-2. **API Gateway Caching**: Enable caching for read-heavy workloads
-3. **DynamoDB On-Demand**: Use on-demand billing for variable workloads
-4. **CloudWatch Logs Retention**: Set appropriate retention periods
-5. **Reserved Capacity**: Consider reserved capacity for predictable workloads
-
-### Security Updates
-
-#### Regular Security Tasks
-1. **Rotate API Keys** quarterly
-2. **Update IAM Policies** based on least privilege principle
-3. **Review Access Logs** for suspicious activity
-4. **Update Dependencies** for security patches
-5. **Scan for Vulnerabilities** using AWS Inspector
-
-#### Security Incident Response
-1. **Immediate Response**: Disable compromised credentials
-2. **Investigation**: Review audit logs and access patterns
-3. **Containment**: Isolate affected resources
-4. **Recovery**: Restore from known good state
-5. **Lessons Learned**: Update procedures and controls
-
-This comprehensive deployment guide provides all the necessary information to successfully deploy, configure, and maintain the OpsAgent Controller across different environments with proper security controls and operational procedures.
+This deployment guide provides comprehensive coverage of deploying and maintaining the OpsAgent Controller across different environments. Follow the appropriate sections based on your deployment needs and environment requirements.
