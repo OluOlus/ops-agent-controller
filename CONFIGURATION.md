@@ -123,9 +123,9 @@ The script will:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `TEAMS_BOT_APP_ID` | Azure AD App Registration ID | `7245659a-25f0-455c-9a75-06451e81fc3e` |
-| `AZURE_TENANT_ID` | Azure AD Tenant ID | `78952f68-6959-4fc9-a579-af36c10eee5c` |
-| `AWS_ACCOUNT_ID` | AWS Account ID | `612176863084` |
+| `TEAMS_BOT_APP_ID` | Azure AD App Registration ID | `[your-teams-bot-app-id]` |
+| `AZURE_TENANT_ID` | Azure AD Tenant ID | `[your-azure-tenant-id]` |
+| `AWS_ACCOUNT_ID` | AWS Account ID | `[your-aws-account-id]` |
 
 ### Optional Variables
 

@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 
-from models import (
+from src.models import (
     InternalMessage,
     ChannelType,
     ExecutionMode,

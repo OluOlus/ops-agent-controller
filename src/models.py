@@ -96,6 +96,7 @@ class PluginResponse:
     """
     success: bool
     correlation_id: str
+    operation: Optional[str] = None  # Add operation field
     summary: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
     execution_mode: ExecutionMode = ExecutionMode.SANDBOX_LIVE
@@ -131,6 +132,8 @@ class PluginResponse:
         }
         
         # Add optional fields if they exist
+        if self.operation is not None:
+            result["operation"] = self.operation
         if self.summary is not None:
             result["summary"] = self.summary
         if self.details is not None:
@@ -182,6 +185,7 @@ class PluginResponse:
         return cls(
             success=data.get("success", False),
             correlation_id=data.get("correlation_id", str(uuid.uuid4())),
+            operation=data.get("operation"),
             summary=data.get("summary"),
             details=data.get("details"),
             execution_mode=ExecutionMode(data.get("execution_mode", "SANDBOX_LIVE")),

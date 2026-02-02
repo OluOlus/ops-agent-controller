@@ -69,9 +69,9 @@ check_prerequisites() {
 configure_aws() {
     log INFO "Configuring AWS credentials..."
     
-    # Set AWS credentials
-    export AWS_ACCESS_KEY_ID="AKIAY5CEVT5WBJNLRI57"
-    export AWS_SECRET_ACCESS_KEY="jHNpt4sJ/xEmSpx6rfYueFLn6577d1QsM/Tembhf"
+    # Set AWS credentials (configure these with your credentials)
+    export AWS_ACCESS_KEY_ID="your-aws-access-key-id"
+    export AWS_SECRET_ACCESS_KEY="your-aws-secret-access-key"
     export AWS_DEFAULT_REGION="$AWS_REGION"
     
     # Verify credentials

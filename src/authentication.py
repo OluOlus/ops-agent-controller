@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import boto3
 from botocore.exceptions import ClientError
 
-from models import UserContext, generate_correlation_id
+from src.models import UserContext, generate_correlation_id
 
 logger = logging.getLogger(__name__)
 
@@ -564,12 +564,17 @@ class RequestSignatureValidator:
             Tuple of (is_valid, error_message)
         """
         try:
+            # In LOCAL_MOCK mode, bypass signature validation for testing
+            execution_mode = os.environ.get("EXECUTION_MODE", "SANDBOX_LIVE")
+            if execution_mode == "LOCAL_MOCK":
+                logger.info("Bypassing Amazon Q signature validation in LOCAL_MOCK mode")
+                return True, None
+            
             # Get plugin secret from SSM Parameter Store
             plugin_secret = self._get_plugin_secret()
             
             if not plugin_secret:
                 # In sandbox mode, allow requests without signature validation
-                execution_mode = os.environ.get("EXECUTION_MODE", "SANDBOX_LIVE")
                 if execution_mode == "SANDBOX_LIVE":
                     logger.warning("Plugin secret not configured, allowing request in sandbox mode")
                     return True, None
@@ -612,6 +617,12 @@ class RequestSignatureValidator:
             Tuple of (is_valid, error_message)
         """
         try:
+            # In LOCAL_MOCK mode, bypass API key validation for testing
+            execution_mode = os.environ.get("EXECUTION_MODE", "SANDBOX_LIVE")
+            if execution_mode == "LOCAL_MOCK":
+                logger.info("Bypassing API key validation in LOCAL_MOCK mode")
+                return True, None
+            
             headers = request_data.get("headers", {})
             api_key = headers.get("x-api-key") or headers.get("X-API-Key")
             
@@ -623,7 +634,6 @@ class RequestSignatureValidator:
                     return self._validate_teams_bearer_token(request_data, correlation_id)
                 
                 # In sandbox mode, allow requests without API key
-                execution_mode = os.environ.get("EXECUTION_MODE", "SANDBOX_LIVE")
                 if execution_mode == "SANDBOX_LIVE":
                     logger.warning("No API key provided, allowing request in sandbox mode")
                     return True, None
@@ -825,6 +835,42 @@ def authenticate_and_authorize_request(request_data: Dict[str, Any], correlation
     """
     if not correlation_id:
         correlation_id = generate_correlation_id()
+    
+    # In LOCAL_MOCK mode, bypass authentication for testing purposes
+    execution_mode = os.environ.get("EXECUTION_MODE", "SANDBOX_LIVE")
+    if execution_mode == "LOCAL_MOCK":
+        logger.info("Bypassing authentication in LOCAL_MOCK mode")
+        
+        # Create a mock user context from the request data
+        try:
+            if isinstance(request_data.get("body"), str):
+                request_body = json.loads(request_data["body"])
+            else:
+                request_body = request_data.get("body", {})
+            
+            user_context_data = request_body.get("user_context", {})
+            user_id = user_context_data.get("user_id", "test-user@company.com")
+            
+            mock_user_context = UserContext(
+                user_id=user_id,
+                teams_tenant=user_context_data.get("teams_tenant"),
+                session_id=user_context_data.get("session_id")
+            )
+            
+            return AuthenticationResult(
+                authenticated=True,
+                user_context=mock_user_context,
+                correlation_id=correlation_id
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create mock user context: {e}")
+            # Fallback to default mock user
+            mock_user_context = UserContext(user_id="test-user@company.com")
+            return AuthenticationResult(
+                authenticated=True,
+                user_context=mock_user_context,
+                correlation_id=correlation_id
+            )
     
     # First validate request signature
     signature_validator = get_signature_validator()

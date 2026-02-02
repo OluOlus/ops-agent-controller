@@ -153,8 +153,8 @@ Azure Bot Service:
 ### Step 3: API Gateway Receives Request
 
 ```http
-POST /sandbox/chat HTTP/1.1
-Host: a1gxl8y8wg.execute-api.eu-west-2.amazonaws.com
+POST /[stage]/chat HTTP/1.1
+Host: [your-api-gateway-id].execute-api.[region].amazonaws.com
 Content-Type: application/json
 Authorization: Bearer <teams-bot-framework-token>
 
@@ -209,18 +209,18 @@ Authorization: Bearer <teams-bot-framework-token>
 
 | Component | Value |
 |-----------|-------|
-| **Tenant ID** | 78952f68-6959-4fc9-a579-af36c10eee5c |
-| **Bot App ID** | 7245659a-25f0-455c-9a75-06451e81fc3e |
+| **Tenant ID** | [your-azure-tenant-id] |
+| **Bot App ID** | [your-teams-bot-app-id] |
 | **Bot Name** | opsagent-live |
 | **Resource Group** | opsagent-rg |
-| **Subscription** | 4753c8c5-c458-4451-9736-51c667874b6f |
+| **Subscription** | [your-azure-subscription-id] |
 
 ### AWS Components
 
 | Component | Value |
 |-----------|-------|
-| **Account ID** | 612176863084 |
-| **Region** | eu-west-2 |
+| **Account ID** | [your-aws-account-id] |
+| **Region** | [your-aws-region] |
 | **Lambda** | opsagent-debug-v2-sandbox |
 | **API Gateway** | a1gxl8y8wg |
 | **Chat Endpoint** | /sandbox/chat |
@@ -229,18 +229,18 @@ Authorization: Bearer <teams-bot-framework-token>
 
 ```yaml
 Azure Bot Service:
-  Messaging Endpoint: https://a1gxl8y8wg.execute-api.eu-west-2.amazonaws.com/sandbox/chat
+  Messaging Endpoint: https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/chat
 
 Teams App Manifest:
-  Bot ID: 7245659a-25f0-455c-9a75-06451e81fc3e
+  Bot ID: [your-teams-bot-app-id]
   Valid Domains:
-    - xt3qtho8l6.execute-api.eu-west-2.amazonaws.com
+    - [your-api-gateway-id].execute-api.[region].amazonaws.com
     - login.microsoftonline.com
 
 Lambda Environment:
-  TEAMS_BOT_APP_ID: 7245659a-25f0-455c-9a75-06451e81fc3e
-  AZURE_TENANT_ID: 78952f68-6959-4fc9-a579-af36c10eee5c
-  AWS_ACCOUNT_ID: 612176863084
+  TEAMS_BOT_APP_ID: [your-teams-bot-app-id]
+  AZURE_TENANT_ID: [your-azure-tenant-id]
+  AWS_ACCOUNT_ID: [your-aws-account-id]
 ```
 
 ## 🔒 Security Layers

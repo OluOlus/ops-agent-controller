@@ -1,1 +1,1 @@
-# OpsAgent Controller - Main package
+# OpsAgent Controller Package
