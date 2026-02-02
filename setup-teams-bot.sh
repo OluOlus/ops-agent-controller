@@ -9,12 +9,12 @@ echo ""
 # Configuration
 BOT_NAME="opsagent-live"
 RESOURCE_GROUP="opsagent-rg"
-SUBSCRIPTION_ID="4753c8c5-c458-4451-9736-51c667874b6f"
-APP_ID="7245659a-25f0-455c-9a75-06451e81fc3e"
+SUBSCRIPTION_ID="[your-azure-subscription-id]"
+APP_ID="[your-teams-bot-app-id]"
 
 # Get the deployed Lambda URL
-LAMBDA_CHAT_ENDPOINT="https://a1gxl8y8wg.execute-api.eu-west-2.amazonaws.com/sandbox/chat"
-LAMBDA_AUTH_CALLBACK="https://a1gxl8y8wg.execute-api.eu-west-2.amazonaws.com/sandbox/auth/callback"
+LAMBDA_CHAT_ENDPOINT="https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/chat"
+LAMBDA_AUTH_CALLBACK="https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/auth/callback"
 
 echo "Configuration:"
 echo "  Bot Name: $BOT_NAME"
@@ -108,7 +108,7 @@ echo ""
 
 # Step 4: Test the endpoint
 echo "Step 4: Testing Lambda endpoint..."
-HEALTH_ENDPOINT="https://a1gxl8y8wg.execute-api.eu-west-2.amazonaws.com/sandbox/health"
+HEALTH_ENDPOINT="https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/health"
 
 if curl -s -f "$HEALTH_ENDPOINT" > /dev/null; then
     echo "✅ Lambda endpoint is responding"

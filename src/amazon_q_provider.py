@@ -10,12 +10,12 @@ from dataclasses import dataclass
 from botocore.exceptions import ClientError
 
 try:
-    from .models import ToolCall, ExecutionMode
-    from .llm_provider import LLMProvider, LLMResponse, LLMProviderError
+    from src.models import ToolCall, ExecutionMode
+    from src.llm_provider import LLMProvider, LLMResponse, LLMProviderError
 except ImportError:
     # Fallback for direct execution
-    from models import ToolCall, ExecutionMode
-    from llm_provider import LLMProvider, LLMResponse, LLMProviderError
+    from src.models import ToolCall, ExecutionMode
+    from src.llm_provider import LLMProvider, LLMResponse, LLMProviderError
 
 logger = logging.getLogger(__name__)
 

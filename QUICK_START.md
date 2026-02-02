@@ -3,13 +3,13 @@
 ## Current Configuration
 
 ### AWS Settings
-- **AWS Account ID**: 612176863084
-- **AWS Region**: eu-west-2
-- **Chat Endpoint**: https://xt3qtho8l6.execute-api.eu-west-2.amazonaws.com/sandbox/chat
+- **AWS Account ID**: [your-aws-account-id]
+- **AWS Region**: [your-aws-region]
+- **Chat Endpoint**: https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/chat
 
 ### Azure/Teams Settings
-- **Azure Tenant ID**: 78952f68-6959-4fc9-a579-af36c10eee5c
-- **Bot App ID**: 7245659a-25f0-455c-9a75-06451e81fc3e
+- **Azure Tenant ID**: [your-azure-tenant-id]
+- **Bot App ID**: [your-teams-bot-app-id]
 - **Bot Name**: opsagent-live
 - **Resource Group**: opsagent-rg
 - **Admin Email**: ops@ooluwafemilimesoftsystem.onmicrosoft.com
@@ -88,12 +88,12 @@ help
 
 ### Test Health Endpoint
 ```bash
-curl https://xt3qtho8l6.execute-api.eu-west-2.amazonaws.com/sandbox/health
+curl https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/health
 ```
 
 ### Test Chat Endpoint
 ```bash
-curl -X POST https://xt3qtho8l6.execute-api.eu-west-2.amazonaws.com/sandbox/chat \
+curl -X POST https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/chat \
   -H "Content-Type: application/json" \
   -d '{
     "userId": "test-user",
@@ -143,9 +143,9 @@ aws logs tail /aws/lambda/opsagent-controller-sandbox --follow --region eu-west-
 
 The Lambda function is configured with these environment variables (already in template.yaml):
 
-- `TEAMS_BOT_APP_ID`: 7245659a-25f0-455c-9a75-06451e81fc3e
-- `AZURE_TENANT_ID`: 78952f68-6959-4fc9-a579-af36c10eee5c
-- `AWS_ACCOUNT_ID`: 612176863084
+- `TEAMS_BOT_APP_ID`: [your-teams-bot-app-id]
+- `AZURE_TENANT_ID`: [your-azure-tenant-id]
+- `AWS_ACCOUNT_ID`: [your-aws-account-id]
 - `EXECUTION_MODE`: DRY_RUN (sandbox)
 - `ENVIRONMENT`: sandbox
 

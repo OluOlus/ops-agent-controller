@@ -62,9 +62,9 @@ ops-agent-controller/teams-app/opsagent-teams-app.zip
 ## 🔧 Technical Configuration
 
 ### Bot Registration
-- **App ID**: `7245659a-25f0-455c-9a75-06451e81fc3e`
-- **Tenant**: `78952f68-6959-4fc9-a579-af36c10eee5c`
-- **Endpoint**: `https://xt3qtho8l6.execute-api.eu-west-2.amazonaws.com/sandbox`
+- **App ID**: `[your-teams-bot-app-id]`
+- **Tenant**: `[your-azure-tenant-id]`
+- **Endpoint**: `https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]`
 
 ### AWS Lambda Function
 - **Name**: `opsagent-controller-sandbox`

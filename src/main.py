@@ -13,13 +13,13 @@ import base64
 
 import requests
 
-from models import InternalMessage, ChannelType, ExecutionMode, validate_message_text, validate_user_id, generate_correlation_id
-from channel_adapters import WebChannelAdapter, create_channel_adapter, ChannelAdapter, detect_channel_type
-from llm_provider import create_llm_provider, LLMProviderError
-from tool_execution_engine import ToolExecutionEngine, ExecutionContext
-from approval_gate import ApprovalGate
-from audit_logger import AuditLogger
-from authentication import authenticate_and_authorize_request, get_user_authenticator, get_signature_validator
+from src.models import InternalMessage, ChannelType, ExecutionMode, validate_message_text, validate_user_id, generate_correlation_id
+from src.channel_adapters import WebChannelAdapter, create_channel_adapter, ChannelAdapter, detect_channel_type
+from src.llm_provider import create_llm_provider, LLMProviderError
+from src.tool_execution_engine import ToolExecutionEngine, ExecutionContext
+from src.approval_gate import ApprovalGate
+from src.audit_logger import AuditLogger
+from src.authentication import authenticate_and_authorize_request, get_user_authenticator, get_signature_validator
 # Teams authentication handled by Amazon Q Business natively
 
 # Configure logging
@@ -31,8 +31,8 @@ _rate_limit_store = {}
 _rate_limit_cleanup_time = time.time()
 _last_pytest_test = None
 
-# Execution modes
-EXECUTION_MODES = ["SANDBOX_LIVE"]
+# Execution modes (Requirement 10: LOCAL_MOCK, DRY_RUN, SANDBOX_LIVE)
+EXECUTION_MODES = ["LOCAL_MOCK", "DRY_RUN", "SANDBOX_LIVE"]
 
 # Rate limiting configuration
 RATE_LIMIT_REQUESTS_PER_MINUTE = 30
@@ -164,6 +164,12 @@ def validate_request_signature(event: Dict[str, Any]) -> bool:
     Requirements: 8.1, 8.2, 9.1
     """
     try:
+        # In LOCAL_MOCK mode, bypass authentication for testing purposes
+        execution_mode = os.environ.get("EXECUTION_MODE", "SANDBOX_LIVE")
+        if execution_mode == "LOCAL_MOCK":
+            logger.info("Bypassing request signature validation in LOCAL_MOCK mode")
+            return True
+        
         # Use the new authentication system
         signature_validator = get_signature_validator()
         is_valid, error_message = signature_validator.validate_plugin_signature(event)
@@ -656,46 +662,52 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         correlation_id = internal_message.correlation_id
 
         # Validate request authenticity and authenticate user
-        if channel_type != ChannelType.TEAMS:
-            # For non-Teams requests, use comprehensive authentication
-            auth_result = authenticate_and_authorize_request(event, correlation_id)
-            
-            if not auth_result.authenticated:
-                logger.warning(f"Authentication failed: {auth_result.error_message}")
-                return create_error_response(401, f"Authentication failed: {auth_result.error_message}", correlation_id)
-            
-            # Update internal message with authenticated user context
-            if auth_result.user_context:
-                internal_message.user_id = auth_result.user_context.user_id
-                # Store additional user context for audit logging
-                internal_message.user_context = auth_result.user_context
-        else:
+        # In LOCAL_MOCK mode, bypass authentication for testing purposes
+        execution_mode_env = os.environ.get("EXECUTION_MODE", "SANDBOX_LIVE")
+
+        if execution_mode_env == "LOCAL_MOCK":
+            # Skip authentication in LOCAL_MOCK mode for testing
+            logger.info("Bypassing authentication in LOCAL_MOCK mode")
+        elif channel_type == ChannelType.TEAMS:
             # For Teams requests, validate using channel adapter and then authenticate user
             if not channel_adapter.validate_request_authenticity(event):
                 logger.warning("Teams request authenticity validation failed")
                 return create_error_response(401, "Request authentication failed")
-            
+
             # Extract and validate user from Teams activity
             user_authenticator = get_user_authenticator()
             if isinstance(event.get("body"), str):
                 activity = json.loads(event["body"])
             else:
                 activity = event.get("body", {})
-            
+
             user_context, error_msg = user_authenticator.extract_user_identity_from_teams(activity)
             if not user_context:
                 logger.warning(f"Failed to extract Teams user identity: {error_msg}")
                 return create_error_response(401, f"User authentication failed: {error_msg}")
-            
+
             # Validate user authorization
             is_authorized, auth_error = user_authenticator.validate_user_authorization(user_context.user_id, correlation_id)
             if not is_authorized:
                 logger.warning(f"Teams user not authorized: {user_context.user_id} - {auth_error}")
                 return create_error_response(403, f"User not authorized: {auth_error}")
-            
+
             # Update internal message with authenticated user context
             internal_message.user_id = user_context.user_id
             internal_message.user_context = user_context
+        else:
+            # For non-Teams requests, use comprehensive authentication
+            auth_result = authenticate_and_authorize_request(event, correlation_id)
+
+            if not auth_result.authenticated:
+                logger.warning(f"Authentication failed: {auth_result.error_message}")
+                return create_error_response(401, f"Authentication failed: {auth_result.error_message}", correlation_id)
+
+            # Update internal message with authenticated user context
+            if auth_result.user_context:
+                internal_message.user_id = auth_result.user_context.user_id
+                # Store additional user context for audit logging
+                internal_message.user_context = auth_result.user_context
 
         logger.info(f"Processing chat message: {correlation_id}")
         
@@ -1137,7 +1149,7 @@ def plugin_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
                 request_body = event.get("body", {})
             
             # Validate plugin request structure
-            from models import validate_plugin_request
+            from src.models import validate_plugin_request
             plugin_request = validate_plugin_request(request_body)
             
         except ValueError as e:
@@ -1197,7 +1209,7 @@ def handle_diagnostic_operation(plugin_request, execution_mode, tool_execution_e
     """Handle diagnostic operations that require no approval"""
     try:
         # Create tool call from plugin request
-        from models import ToolCall, PluginResponse
+        from src.models import ToolCall, PluginResponse
         tool_call = ToolCall(
             tool_name=plugin_request.operation,
             args=plugin_request.parameters,
@@ -1225,6 +1237,7 @@ def handle_diagnostic_operation(plugin_request, execution_mode, tool_execution_e
             response = PluginResponse(
                 success=True,
                 correlation_id=correlation_id,
+                operation=plugin_request.operation,
                 summary=f"Successfully executed {plugin_request.operation}",
                 details=tool_results[0].data,
                 execution_mode=execution_mode
@@ -1234,6 +1247,7 @@ def handle_diagnostic_operation(plugin_request, execution_mode, tool_execution_e
             response = PluginResponse(
                 success=False,
                 correlation_id=correlation_id,
+                operation=plugin_request.operation,
                 error={"code": "EXECUTION_ERROR", "message": error_msg},
                 execution_mode=execution_mode
             )
@@ -1265,7 +1279,7 @@ def handle_propose_action(plugin_request, execution_mode, approval_gate, audit_l
             return create_error_response(400, "Missing or insufficient 'reason' parameter (minimum 10 characters required)", correlation_id)
         
         # Create tool call for the proposed action
-        from models import ToolCall
+        from src.models import ToolCall
         tool_call = ToolCall(
             tool_name=action,
             args={k: v for k, v in plugin_request.parameters.items() if k not in ["action", "reason"]},
@@ -1273,7 +1287,27 @@ def handle_propose_action(plugin_request, execution_mode, approval_gate, audit_l
             correlation_id=correlation_id,
             user_id=plugin_request.user_context.user_id
         )
-        
+
+        # REQUIREMENT 7: Validate resource tags BEFORE approval token generation
+        # This ensures users don't get approval tokens for resources they can't actually modify
+        from src.tool_guardrails import ToolGuardrails, ResourceTagValidationError
+        try:
+            guardrails = ToolGuardrails(execution_mode=execution_mode)
+            policy = guardrails.get_tool_policy(action)
+            if policy and policy.requires_resource_tags:
+                guardrails._validate_resource_tags(tool_call, policy)
+                logger.info(f"Tag validation passed for proposed action: {action}")
+        except ResourceTagValidationError as e:
+            logger.warning(f"Tag validation failed for proposed action: {str(e)}")
+            return create_error_response(
+                403,
+                f"Resource validation failed: {str(e)}. Only resources tagged with 'OpsAgentManaged=true' can be modified.",
+                correlation_id
+            )
+        except Exception as e:
+            logger.error(f"Tag validation error: {str(e)}")
+            return create_error_response(500, f"Tag validation error: {str(e)}", correlation_id)
+
         # Determine risk level based on action type
         risk_level = "medium"  # Default
         if action == "reboot_ec2":
@@ -1300,7 +1334,7 @@ def handle_propose_action(plugin_request, execution_mode, approval_gate, audit_l
         action_plan = _generate_action_plan(action, plugin_request.parameters, reason)
         
         # Format response
-        from models import PluginResponse
+        from src.models import PluginResponse
         response = PluginResponse(
             success=True,
             correlation_id=correlation_id,
@@ -1359,7 +1393,7 @@ def _generate_action_plan(action: str, parameters: dict, reason: str) -> str:
 def handle_approve_action(plugin_request, execution_mode, tool_execution_engine, approval_gate, audit_logger, correlation_id):
     """Handle action approval and execution"""
     try:
-        from models import PluginResponse
+        from src.models import PluginResponse
         
         # Extract approval token
         approval_token = plugin_request.parameters.get("approval_token")
@@ -1392,7 +1426,7 @@ def handle_approve_action(plugin_request, execution_mode, tool_execution_engine,
         if not approval_request.tool_call:
             return create_error_response(500, "Approval request missing tool call", correlation_id)
         
-        from tool_execution_engine import ExecutionContext
+        from src.tool_execution_engine import ExecutionContext
         execution_context = ExecutionContext(
             correlation_id=correlation_id,
             user_id=plugin_request.user_context.user_id,
@@ -1446,7 +1480,7 @@ def handle_workflow_operation(plugin_request, execution_mode, tool_execution_eng
     """Handle workflow operations (incident records, notifications)"""
     try:
         # Create tool call from plugin request
-        from models import ToolCall
+        from src.models import ToolCall, PluginResponse
         tool_call = ToolCall(
             tool_name=plugin_request.operation,
             args=plugin_request.parameters,
@@ -1471,12 +1505,12 @@ def handle_workflow_operation(plugin_request, execution_mode, tool_execution_eng
         
         # Format response based on operation type
         if tool_results and tool_results[0].success:
-            from models import PluginResponse
             
             if plugin_request.operation == "create_incident_record":
                 response = PluginResponse(
                     success=True,
                     correlation_id=correlation_id,
+                    operation=plugin_request.operation,
                     incident_id=tool_results[0].data.get("incident_id"),
                     created_at=datetime.utcnow(),
                     notification_sent=tool_results[0].data.get("notification_sent", False),
@@ -1488,6 +1522,7 @@ def handle_workflow_operation(plugin_request, execution_mode, tool_execution_eng
                 response = PluginResponse(
                     success=True,
                     correlation_id=correlation_id,
+                    operation=plugin_request.operation,
                     message_id=tool_results[0].data.get("message_id"),
                     posted_at=datetime.utcnow(),
                     summary=f"Successfully posted summary to channel",
@@ -1498,6 +1533,7 @@ def handle_workflow_operation(plugin_request, execution_mode, tool_execution_eng
                 response = PluginResponse(
                     success=True,
                     correlation_id=correlation_id,
+                    operation=plugin_request.operation,
                     summary=f"Successfully executed {plugin_request.operation}",
                     details=tool_results[0].data,
                     execution_mode=execution_mode
@@ -1507,6 +1543,7 @@ def handle_workflow_operation(plugin_request, execution_mode, tool_execution_eng
             response = PluginResponse(
                 success=False,
                 correlation_id=correlation_id,
+                operation=plugin_request.operation,
                 error={"code": "EXECUTION_ERROR", "message": error_msg},
                 execution_mode=execution_mode
             )
@@ -1655,27 +1692,17 @@ def request_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any
                 return create_error_response(429, "Too Many Requests - Rate limit exceeded")
         
         # Validate request authentication (except for health endpoint and Teams requests)
-        if path != "/health" and path != "/auth/callback":
-            # Log all request details for debugging
-            headers = event.get("headers", {})
-            auth_header = headers.get("authorization", headers.get("Authorization", ""))
-            logger.info(f"DEBUG: Incoming request - method={http_method}, path={path}")
-            logger.info(f"DEBUG: Headers keys={list(headers.keys())}")
-            logger.info(f"DEBUG: Has auth header={bool(auth_header)}, starts with Bearer={auth_header.startswith('Bearer ') if auth_header else False}")
-            
-            # Log body structure (safely)
-            body_raw = event.get("body", "")
-            logger.info(f"DEBUG: Body type={type(body_raw)}, length={len(str(body_raw)) if body_raw else 0}")
-            
+        # In LOCAL_MOCK mode, bypass authentication for testing purposes
+        execution_mode = os.environ.get("EXECUTION_MODE", "SANDBOX_LIVE")
+
+        if path != "/health" and path != "/auth/callback" and execution_mode != "LOCAL_MOCK":
             # For Teams requests, skip authentication for now (we'll validate in chat_handler)
+            body_raw = event.get("body", "")
             try:
                 if isinstance(body_raw, str):
                     body = json.loads(body_raw) if body_raw else {}
                 else:
                     body = body_raw or {}
-
-                logger.info(f"DEBUG: Parsed body keys={list(body.keys()) if isinstance(body, dict) else 'not_dict'}")
-                logger.info(f"DEBUG: Body type field={body.get('type') if isinstance(body, dict) else 'N/A'}")
 
                 # Check if this looks like a Teams Bot Framework request
                 # Bot Framework requests have type="message", from, and conversation fields
@@ -1686,20 +1713,14 @@ def request_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any
                     "conversation" in body
                 )
 
-                logger.info(f"DEBUG: Teams detection - is_teams={is_teams_request}, has_type={'type' in body}, has_from={'from' in body}, has_conversation={'conversation' in body}")
-
                 # Allow Bot Framework requests through without our custom authentication
                 # Bot Framework has its own JWT-based auth that we validate separately
                 if not is_teams_request:
-                    logger.info("DEBUG: Not a Teams request, validating signature")
                     if not validate_request_signature(event):
                         logger.warning(f"Authentication failed for {http_method} {path}")
                         return create_error_response(401, "Unauthorized - Invalid authentication")
-                else:
-                    logger.info("DEBUG: Bot Framework request detected, skipping custom authentication")
             except (json.JSONDecodeError, TypeError) as e:
                 logger.error(f"JSON parsing error: {e}")
-                logger.info("DEBUG: JSON parsing failed, falling back to normal authentication")
                 # If we can't parse the body, fall back to normal authentication
                 if not validate_request_signature(event):
                     logger.warning(f"Authentication failed for {http_method} {path}")

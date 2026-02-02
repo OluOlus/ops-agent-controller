@@ -2,7 +2,7 @@
 
 ## Current Status
 - ✅ AWS Lambda function deployed and working
-- ✅ API Gateway responding: `https://a1gxl8y8wg.execute-api.eu-west-2.amazonaws.com/sandbox`
+- ✅ API Gateway responding: `https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]`
 - ✅ Bot Framework authentication fixed (Status 200)
 - ❌ **Teams not sending requests to endpoint**
 
@@ -18,22 +18,22 @@ The issue is **Azure Bot Service configuration** - Teams doesn't know where to s
 1. **Go to Azure Portal**: https://portal.azure.com
 2. **Find your bot**: 
    - Search for "Bot Services" 
-   - Look for bot with App ID: `7245659a-25f0-455c-9a75-06451e81fc3e`
+   - Look for bot with App ID: `[your-teams-bot-app-id]`
 3. **Go to Configuration**:
    - Click on your bot service
    - Navigate to "Configuration" or "Settings"
 4. **Set Messaging Endpoint**:
    ```
-   https://a1gxl8y8wg.execute-api.eu-west-2.amazonaws.com/sandbox/chat
+   https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/chat
    ```
 5. **IMPORTANT**: Click "Save" and wait for confirmation
 
 ### 2. Verify Bot Registration Settings
 
 Ensure these exact settings:
-- **Bot ID**: `7245659a-25f0-455c-9a75-06451e81fc3e`
-- **Messaging Endpoint**: `https://a1gxl8y8wg.execute-api.eu-west-2.amazonaws.com/sandbox/chat`
-- **Microsoft App ID**: `7245659a-25f0-455c-9a75-06451e81fc3e`
+- **Bot ID**: `[your-teams-bot-app-id]`
+- **Messaging Endpoint**: `https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/chat`
+- **Microsoft App ID**: `[your-teams-bot-app-id]`
 
 ### 3. Test Azure Bot Service First
 
@@ -94,7 +94,7 @@ Teams channel configuration issue:
 
 2. **Verify Bot App Registration**:
    - Go to Azure AD → App Registrations
-   - Find app ID: `7245659a-25f0-455c-9a75-06451e81fc3e`
+   - Find app ID: `[your-teams-bot-app-id]`
    - Verify it's active and has proper permissions
 
 3. **Check CloudWatch Logs**:
@@ -108,10 +108,10 @@ Based on the provided information:
 
 ```json
 {
-  "appId": "7245659a-25f0-455c-9a75-06451e81fc3e",
-  "messagingEndpoint": "https://a1gxl8y8wg.execute-api.eu-west-2.amazonaws.com/sandbox/chat",
+  "appId": "[your-teams-bot-app-id]",
+  "messagingEndpoint": "https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/chat",
   "replyUrls": [
-    "https://a1gxl8y8wg.execute-api.eu-west-2.amazonaws.com/sandbox/auth/callback"
+    "https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/auth/callback"
   ]
 }
 ```
@@ -130,7 +130,7 @@ Once properly configured:
 If you want to test the API directly while fixing Teams:
 
 ```bash
-curl -X POST "https://a1gxl8y8wg.execute-api.eu-west-2.amazonaws.com/sandbox/chat" \
+curl -X POST "https://[your-api-gateway-id].execute-api.[region].amazonaws.com/[stage]/chat" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer test-token" \
   -d '{

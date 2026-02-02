@@ -16,8 +16,10 @@ Parameters:
     Type: String
     Default: SANDBOX_LIVE
     AllowedValues:
+      - LOCAL_MOCK
+      - DRY_RUN
       - SANDBOX_LIVE
-    Description: OpsAgent execution mode (sandbox only)
+    Description: OpsAgent execution mode (Requirement 10 - LOCAL_MOCK, DRY_RUN, SANDBOX_LIVE)
   
   LLMProvider:
     Type: String

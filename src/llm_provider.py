@@ -12,10 +12,10 @@ from abc import ABC, abstractmethod
 import boto3
 from botocore.exceptions import ClientError, BotoCoreError
 try:
-    from models import ToolCall, ExecutionMode
+    from src.models import ToolCall, ExecutionMode
 except ImportError:
     # Fallback for direct execution
-    from models import ToolCall, ExecutionMode
+    from src.models import ToolCall, ExecutionMode
 
 logger = logging.getLogger(__name__)
 

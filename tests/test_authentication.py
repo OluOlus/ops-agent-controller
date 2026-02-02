@@ -20,7 +20,7 @@ from authentication import (
     get_user_authenticator,
     get_signature_validator
 )
-from models import UserContext, PluginRequest, generate_correlation_id
+from src.models import UserContext, PluginRequest, generate_correlation_id
 
 
 class TestUserAuthenticator:
