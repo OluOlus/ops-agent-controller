@@ -67,10 +67,9 @@ class TestToolGuardrails:
         guardrails = ToolGuardrails(ExecutionMode.SANDBOX_LIVE)
         
         assert guardrails.execution_mode == ExecutionMode.SANDBOX_LIVE
-        assert len(guardrails.tool_policies) == 9  # All 8 operations plus describe_ec2_instances
-        assert len(guardrails.allowed_tools) == 9
+        assert len(guardrails.tool_policies) == 10  # All operations including reboot_ec2 alias
+        assert len(guardrails.allowed_tools) == 10
         assert guardrails.ec2_client == mock_client
-        mock_boto_client.assert_called_once_with('ec2')
     
     @patch('boto3.client')
     def test_initialization_aws_client_failure(self, mock_boto_client):
@@ -85,24 +84,25 @@ class TestToolGuardrails:
         """Test getting allowed tools list"""
         guardrails = ToolGuardrails(ExecutionMode.SANDBOX_LIVE)
         allowed_tools = guardrails.get_allowed_tools_list()
-        
-        # Check that all 8 operations from requirements are present
+
+        # Check that all operations from requirements are present
         expected_tools = [
             "get_cloudwatch_metrics",
-            "get_ec2_status", 
+            "get_ec2_status",
             "describe_ec2_instances",
             "describe_alb_target_health",
             "search_cloudtrail_events",
             "reboot_ec2_instance",
+            "reboot_ec2",  # Alias for architecture spec naming convention
             "scale_ecs_service",
             "create_incident_record",
             "post_summary_to_channel"
         ]
-        
+
         for tool in expected_tools:
             assert tool in allowed_tools, f"Tool {tool} should be in allowed tools list"
-        
-        assert len(allowed_tools) == 9  # All 8 operations plus describe_ec2_instances
+
+        assert len(allowed_tools) == 10  # All operations including reboot_ec2 alias
     
     def test_is_tool_allowed(self):
         """Test checking if tool is allowed"""
@@ -613,19 +613,42 @@ class TestToolGuardrails:
     def test_ecs_service_tag_validation(self, mock_boto_client):
         """Test ECS service tag validation"""
         mock_ec2_client = Mock()
-        mock_boto_client.return_value = mock_ec2_client
-        
+        mock_ecs_client = Mock()
+
+        # Configure boto3.client to return different mocks based on service name
+        def client_factory(service_name):
+            if service_name == 'ec2':
+                return mock_ec2_client
+            elif service_name == 'ecs':
+                return mock_ecs_client
+            return Mock()
+
+        mock_boto_client.side_effect = client_factory
+
+        # Configure ECS mock responses
+        mock_ecs_client.describe_services.return_value = {
+            'services': [{
+                'serviceArn': 'arn:aws:ecs:us-east-1:123456789012:service/my-cluster/my-service',
+                'serviceName': 'my-service'
+            }]
+        }
+        mock_ecs_client.list_tags_for_resource.return_value = {
+            'tags': [
+                {'key': 'OpsAgentManaged', 'value': 'true'}
+            ]
+        }
+
         guardrails = ToolGuardrails(ExecutionMode.SANDBOX_LIVE)
         tool_call = ToolCall(
             tool_name="scale_ecs_service",
             args={
                 "cluster": "my-cluster",
-                "service": "my-service", 
+                "service": "my-service",
                 "desired_count": 3
             }
         )
-        
-        # Should not raise exception (ECS validation is simulated)
+
+        # Should not raise exception with valid tags
         guardrails.validate_tool_call(tool_call)
     
     def test_validate_execution_context(self):
@@ -671,14 +694,14 @@ class TestToolGuardrails:
     def test_get_execution_summary(self):
         """Test getting execution summary"""
         guardrails = ToolGuardrails(ExecutionMode.SANDBOX_LIVE)
-        
+
         summary = guardrails.get_execution_summary()
-        
+
         assert summary["execution_mode"] == "SANDBOX_LIVE"
-        assert summary["total_tools"] == 9
-        assert summary["allowed_tools"] == 9
-        assert summary["tools_requiring_approval"] == 2  # reboot_ec2_instance, scale_ecs_service
-        assert summary["tools_requiring_tags"] == 2  # reboot_ec2_instance, scale_ecs_service
+        assert summary["total_tools"] == 10  # Including reboot_ec2 alias
+        assert summary["allowed_tools"] == 10
+        assert summary["tools_requiring_approval"] == 3  # reboot_ec2_instance, reboot_ec2, scale_ecs_service
+        assert summary["tools_requiring_tags"] == 3  # reboot_ec2_instance, reboot_ec2, scale_ecs_service
         assert "diagnostic" in summary["tool_categories"]
         assert "write_operations" in summary["tool_categories"]
         assert "workflow" in summary["tool_categories"]

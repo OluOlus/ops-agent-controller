@@ -66,11 +66,16 @@ class ToolGuardrails:
         
         # Initialize AWS clients for tag validation (only for modes that need it)
         self.ec2_client = None
+        self.ecs_client = None
         if execution_mode in [ExecutionMode.DRY_RUN, ExecutionMode.SANDBOX_LIVE]:
             try:
                 self.ec2_client = boto3.client('ec2')
             except Exception as e:
                 logger.warning(f"Failed to initialize EC2 client: {e}")
+            try:
+                self.ecs_client = boto3.client('ecs')
+            except Exception as e:
+                logger.warning(f"Failed to initialize ECS client: {e}")
     
     def _initialize_tool_policies(self) -> Dict[str, ToolPolicy]:
         """Initialize tool policies with schemas and requirements"""
@@ -280,7 +285,33 @@ class ToolGuardrails:
                 "additionalProperties": False
             }
         )
-        
+
+        # EC2 reboot alias (matches architecture spec naming convention)
+        policies["reboot_ec2"] = ToolPolicy(
+            tool_name="reboot_ec2",
+            allowed=True,
+            requires_approval=True,
+            allowed_execution_modes={ExecutionMode.LOCAL_MOCK, ExecutionMode.DRY_RUN, ExecutionMode.SANDBOX_LIVE},
+            requires_resource_tags=True,
+            required_tags={"OpsAgentManaged": "true"},
+            schema={
+                "type": "object",
+                "properties": {
+                    "instance_id": {
+                        "type": "string",
+                        "pattern": "^i-[0-9a-f]{8,17}$"
+                    },
+                    "reason": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                    }
+                },
+                "required": ["instance_id"],
+                "additionalProperties": False
+            }
+        )
+
         # ECS service scaling tool (write operation, requires approval and tags)
         policies["scale_ecs_service"] = ToolPolicy(
             tool_name="scale_ecs_service",
@@ -472,11 +503,41 @@ class ToolGuardrails:
                 resource_tags = {tag['Key']: tag['Value'] for tag in response.get('Tags', [])}
                 
             elif resource_type == "ecs":
-                # For ECS services, we need to use ECS client to get service tags
-                # For now, we'll simulate this validation since we don't have ECS client initialized
-                # In a real implementation, we would initialize an ECS client and check service tags
-                logger.info(f"ECS service tag validation for {resource_id} - simulated in SANDBOX_LIVE mode")
-                resource_tags = {"OpsAgentManaged": "true"}  # Simulate valid tags for testing
+                # For ECS services, use ECS client to get service tags
+                if not self.ecs_client:
+                    raise ResourceTagValidationError("ECS client not available for tag validation")
+
+                cluster, service = resource_id.split(":", 1)
+
+                # First, describe the service to get its ARN
+                try:
+                    describe_response = self.ecs_client.describe_services(
+                        cluster=cluster,
+                        services=[service]
+                    )
+
+                    services = describe_response.get('services', [])
+                    if not services:
+                        raise ResourceTagValidationError(f"ECS service {service} not found in cluster {cluster}")
+
+                    service_arn = services[0].get('serviceArn')
+                    if not service_arn:
+                        raise ResourceTagValidationError(f"Could not get ARN for ECS service {service}")
+
+                    # Get tags for the service
+                    tags_response = self.ecs_client.list_tags_for_resource(resourceArn=service_arn)
+                    resource_tags = {tag['key']: tag['value'] for tag in tags_response.get('tags', [])}
+
+                    logger.info(f"ECS service tag validation for {resource_id} - found tags: {list(resource_tags.keys())}")
+
+                except ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                    if error_code == 'ServiceNotFoundException':
+                        raise ResourceTagValidationError(f"ECS service {service} not found in cluster {cluster}")
+                    elif error_code == 'ClusterNotFoundException':
+                        raise ResourceTagValidationError(f"ECS cluster {cluster} not found")
+                    else:
+                        raise ResourceTagValidationError(f"AWS ECS API error during tag validation: {e}")
             else:
                 raise ResourceTagValidationError(f"Unsupported resource type for tag validation: {resource_type}")
             
@@ -691,12 +752,12 @@ class ToolGuardrails:
             "aws_client_available": self.ec2_client is not None,
             "tool_categories": {
                 "diagnostic": [
-                    "get_cloudwatch_metrics", "get_ec2_status", 
-                    "describe_ec2_instances", "describe_alb_target_health", 
+                    "get_cloudwatch_metrics", "get_ec2_status",
+                    "describe_ec2_instances", "describe_alb_target_health",
                     "search_cloudtrail_events"
                 ],
                 "write_operations": [
-                    "reboot_ec2_instance", "scale_ecs_service"
+                    "reboot_ec2_instance", "reboot_ec2", "scale_ecs_service"
                 ],
                 "workflow": [
                     "create_incident_record", "post_summary_to_channel"
@@ -755,16 +816,22 @@ class ToolGuardrails:
     def set_execution_mode(self, execution_mode: ExecutionMode) -> None:
         """
         Update the execution mode
-        
+
         Args:
             execution_mode: New execution mode to set
         """
         logger.info(f"Changing execution mode from {self.execution_mode.value} to {execution_mode.value}")
         self.execution_mode = execution_mode
-        
-        # Reinitialize AWS clients if needed
-        if not self.ec2_client:
-            try:
-                self.ec2_client = boto3.client('ec2')
-            except Exception as e:
-                logger.warning(f"Failed to initialize EC2 client: {e}")
+
+        # Reinitialize AWS clients if needed for non-mock modes
+        if execution_mode in [ExecutionMode.DRY_RUN, ExecutionMode.SANDBOX_LIVE]:
+            if not self.ec2_client:
+                try:
+                    self.ec2_client = boto3.client('ec2')
+                except Exception as e:
+                    logger.warning(f"Failed to initialize EC2 client: {e}")
+            if not self.ecs_client:
+                try:
+                    self.ecs_client = boto3.client('ecs')
+                except Exception as e:
+                    logger.warning(f"Failed to initialize ECS client: {e}")

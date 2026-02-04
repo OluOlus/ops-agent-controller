@@ -271,6 +271,7 @@ Resources:
           CLOUDWATCH_LOG_GROUP: !Ref AuditLogGroup
           AUDIT_TABLE_NAME: !Ref AuditTable
           INCIDENT_TABLE_NAME: !Ref IncidentTable
+          APPROVAL_GATE_TABLE_NAME: !Ref ApprovalGateTable
           NOTIFICATION_TOPIC_ARN: !Ref NotificationTopic
           KMS_KEY_ID: !Ref OpsAgentKMSKey
           API_KEY_PARAMETER: !Ref ApiKeyParameterName
@@ -353,16 +354,17 @@ Resources:
               - !GetAtt AuditLogGroup.Arn
               - !GetAtt ApiGatewayLogGroup.Arn
           
-          # DynamoDB permissions for audit storage and incident records
+          # DynamoDB permissions for audit storage, incident records, and approval gate
           - Effect: Allow
             Action:
               - dynamodb:PutItem
               - dynamodb:GetItem
               - dynamodb:Query
               - dynamodb:UpdateItem
-            Resource: 
+            Resource:
               - !GetAtt AuditTable.Arn
               - !GetAtt IncidentTable.Arn
+              - !GetAtt ApprovalGateTable.Arn
               - !Sub '${IncidentTable.Arn}/index/*'
           
           # SNS permissions for notifications
@@ -580,6 +582,80 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
 
+  # CloudWatch Dashboard for monitoring
+  OpsAgentDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub 'OpsAgent-${Environment}'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", { "stat": "Sum", "label": "Total Invocations" } ],
+                  [ ".", "Errors", { "stat": "Sum", "label": "Errors", "yAxis": "right" } ],
+                  [ ".", "Duration", { "stat": "Average", "label": "Avg Duration (ms)" } ],
+                  [ ".", "Throttles", { "stat": "Sum", "label": "Throttles", "yAxis": "right" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Function Metrics",
+                "period": 300,
+                "yAxis": {
+                  "left": { "min": 0 },
+                  "right": { "min": 0 }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/DynamoDB", "ConsumedReadCapacityUnits", { "stat": "Sum" } ],
+                  [ ".", "ConsumedWriteCapacityUnits", { "stat": "Sum" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "DynamoDB Capacity Units",
+                "period": 300
+              }
+            },
+            {
+              "type": "log",
+              "properties": {
+                "query": "SOURCE '${AuditLogGroup}'\n| fields @timestamp, @message\n| filter @message like /ERROR/\n| sort @timestamp desc\n| limit 20",
+                "region": "${AWS::Region}",
+                "title": "Recent Errors",
+                "stacked": false
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/ApiGateway", "Count", { "stat": "Sum", "label": "API Requests" } ],
+                  [ ".", "4XXError", { "stat": "Sum", "label": "4XX Errors", "yAxis": "right" } ],
+                  [ ".", "5XXError", { "stat": "Sum", "label": "5XX Errors", "yAxis": "right" } ],
+                  [ ".", "Latency", { "stat": "Average", "label": "Avg Latency (ms)" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "API Gateway Metrics",
+                "period": 300,
+                "yAxis": {
+                  "left": { "min": 0 },
+                  "right": { "min": 0 }
+                }
+              }
+            }
+          ]
+        }
+
   # DynamoDB table for incident records
   IncidentTable:
     Type: AWS::DynamoDB::Table
@@ -692,6 +768,43 @@ Resources:
           Value: !Ref Environment
         - Key: Owner
           Value: Platform-Team
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+
+  # DynamoDB table for approval gate tokens
+  ApprovalGateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'opsagent-approval-gate-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: token
+          AttributeType: S
+        - AttributeName: record_type
+          AttributeType: S
+      KeySchema:
+        - AttributeName: token
+          KeyType: HASH
+        - AttributeName: record_type
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: !If [EnableEncryption, true, false]
+        SSEType: !If [EnableEncryption, KMS, !Ref 'AWS::NoValue']
+        KMSMasterKeyId: !If [EnableEncryption, !Ref OpsAgentKMSKey, !Ref 'AWS::NoValue']
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: OpsAgent
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Owner
+          Value: Platform-Team
+        - Key: Purpose
+          Value: Approval workflow token storage
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
 
@@ -921,6 +1034,12 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-IncidentTable'
 
+  ApprovalGateTableName:
+    Description: 'DynamoDB table for approval gate tokens'
+    Value: !Ref ApprovalGateTable
+    Export:
+      Name: !Sub '${AWS::StackName}-ApprovalGateTable'
+
   NotificationTopicArn:
     Description: 'SNS topic for notifications'
     Value: !Ref NotificationTopic
@@ -938,6 +1057,12 @@ Outputs:
     Value: !Sub 'https://${OpsAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health'
     Export:
       Name: !Sub '${AWS::StackName}-HealthUrl'
+
+  DashboardUrl:
+    Description: 'CloudWatch Dashboard for monitoring'
+    Value: !Sub 'https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=OpsAgent-${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-DashboardUrl'
 
   ChatEndpointUrl:
     Description: 'Chat endpoint for sending messages'
