@@ -87,8 +87,22 @@ def get_or_create_components(execution_mode: ExecutionMode):
     
     # Initialize approval gate if not exists
     if _approval_gate is None:
-        _approval_gate = ApprovalGate(storage_backend="memory", default_expiry_minutes=15)
-        logger.info("Initialized approval gate")
+        environment = os.environ.get("ENVIRONMENT", "sandbox")
+        approval_gate_table = os.environ.get("APPROVAL_GATE_TABLE_NAME")
+
+        # Use DynamoDB backend for production, memory for sandbox/test
+        if environment == "production" and approval_gate_table:
+            storage_backend = "dynamodb"
+            _approval_gate = ApprovalGate(
+                storage_backend=storage_backend,
+                default_expiry_minutes=15,
+                dynamodb_table_name=approval_gate_table
+            )
+            logger.info(f"Initialized approval gate with DynamoDB backend (table: {approval_gate_table})")
+        else:
+            storage_backend = "memory"
+            _approval_gate = ApprovalGate(storage_backend=storage_backend, default_expiry_minutes=15)
+            logger.info(f"Initialized approval gate with {storage_backend} backend")
     
     # Initialize audit logger if not exists or mode changed
     if _audit_logger is None:
@@ -517,6 +531,34 @@ def get_execution_mode() -> str:
     return mode
 
 
+def _handle_llm_error(
+    error: Exception,
+    channel_type: ChannelType,
+    channel_adapter: ChannelAdapter,
+    audit_logger: AuditLogger,
+    correlation_id: str,
+    user_id: str,
+    incoming_activity: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Handle LLM provider errors with consistent response formatting
+    Requirements: 10.3
+    """
+    error_message = "I'm having trouble understanding your request. Please try again."
+    logger.error(f"LLM error: {error}")
+    audit_logger.log_error(error, correlation_id, user_id, {"step": "llm_generation"})
+
+    if channel_type == ChannelType.TEAMS and incoming_activity:
+        return create_bot_framework_response(error_message, incoming_activity, correlation_id=correlation_id)
+
+    error_response = channel_adapter.format_error_response(
+        error_message,
+        "LLM_ERROR",
+        correlation_id
+    )
+    return create_success_response(error_response.to_dict(), correlation_id)
+
+
 def get_system_status() -> Dict[str, Any]:
     """
     Get system status including dependencies
@@ -796,38 +838,16 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
                     internal_message.channel.value
                 )
             
-        except LLMProviderError as e:
-            logger.error(f"LLM provider error: {e}")
-            audit_logger.log_error(e, correlation_id, internal_message.user_id, {"step": "llm_generation"})
-
-            error_message = "I'm having trouble understanding your request. Please try again."
-
-            # Return Bot Framework format for Teams
-            if channel_type == ChannelType.TEAMS and incoming_activity:
-                return create_bot_framework_response(error_message, incoming_activity, correlation_id=correlation_id)
-
-            error_response = channel_adapter.format_error_response(
-                error_message,
-                "LLM_ERROR",
-                correlation_id
+        except (LLMProviderError, Exception) as e:
+            return _handle_llm_error(
+                error=e,
+                channel_type=channel_type,
+                channel_adapter=channel_adapter,
+                audit_logger=audit_logger,
+                correlation_id=correlation_id,
+                user_id=internal_message.user_id,
+                incoming_activity=incoming_activity
             )
-            return create_success_response(error_response.to_dict(), correlation_id)
-        except Exception as e:
-            logger.error(f"LLM generation error: {e}")
-            audit_logger.log_error(e, correlation_id, internal_message.user_id, {"step": "llm_generation"})
-
-            error_message = "I'm having trouble understanding your request. Please try again."
-
-            # Return Bot Framework format for Teams
-            if channel_type == ChannelType.TEAMS and incoming_activity:
-                return create_bot_framework_response(error_message, incoming_activity, correlation_id=correlation_id)
-
-            error_response = channel_adapter.format_error_response(
-                error_message,
-                "LLM_ERROR",
-                correlation_id
-            )
-            return create_success_response(error_response.to_dict(), correlation_id)
         
         # Check if any tools require approval
         approval_required_tools = [tc for tc in llm_response.tool_calls if tc.requires_approval]
@@ -952,7 +972,7 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         if internal_message and correlation_id:
             # Log error if we have context
             try:
-                _, _, _, audit_logger, _ = get_or_create_components(effective_execution_mode)
+                _, _, _, audit_logger = get_or_create_components(effective_execution_mode)
                 audit_logger.log_error(e, correlation_id, internal_message.user_id, {"step": "validation"})
             except:
                 pass
@@ -968,7 +988,7 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         if internal_message and correlation_id:
             # Log error if we have context
             try:
-                _, _, _, audit_logger, _ = get_or_create_components(effective_execution_mode)
+                _, _, _, audit_logger = get_or_create_components(effective_execution_mode)
                 audit_logger.log_error(e, correlation_id, internal_message.user_id, {"step": "processing"})
             except:
                 pass
@@ -1048,7 +1068,7 @@ def handle_approval_response(
             return create_success_response(channel_response.to_dict(), correlation_id)
         
         # Get system components
-        llm_provider, tool_execution_engine, _, _, _ = get_or_create_components(effective_execution_mode)
+        llm_provider, tool_execution_engine, _, _ = get_or_create_components(effective_execution_mode)
         
         # Execute the approved tool
         execution_context = ExecutionContext(
