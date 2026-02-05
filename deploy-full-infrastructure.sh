@@ -83,7 +83,7 @@ create_ssm_parameters() {
 deploy_main_infrastructure() {
     log INFO "Deploying main OpsAgent infrastructure..."
     
-    sam build --template infrastructure/template-fixed.yaml
+    sam build --template infrastructure/template.yaml
     
     sam deploy \
         --template-file .aws-sam/build/template.yaml \
@@ -333,10 +333,16 @@ main() {
     log INFO "Region: $AWS_REGION"
     log INFO "Stack Name: $STACK_NAME"
     
-    # Set AWS credentials (configure these with your credentials)
-    export AWS_ACCESS_KEY_ID="your-aws-access-key-id"
-    export AWS_SECRET_ACCESS_KEY="your-aws-secret-access-key"
+    # Use existing AWS credentials from environment or AWS CLI profile
+    # Configure via: aws configure, or set AWS_PROFILE, or set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY
     export AWS_DEFAULT_REGION="$AWS_REGION"
+
+    # Verify AWS credentials are available
+    if ! aws sts get-caller-identity &>/dev/null; then
+        log ERROR "AWS credentials not configured. Run 'aws configure' or set AWS_PROFILE"
+        exit 1
+    fi
+    log INFO "Using AWS account: $(aws sts get-caller-identity --query Account --output text)"
     
     deploy_test_resources
     create_ssm_parameters
