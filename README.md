@@ -665,10 +665,6 @@ See [Troubleshooting Guide](./docs/troubleshooting.md) for detailed solutions.
 - **Issues**: GitHub Issues for bug reports and feature requests
 - **Discussions**: GitHub Discussions for questions and community support
 
-### Reporting Security Issues
-
-For security vulnerabilities, please email security@company.com instead of creating public issues.
-
 ### Roadmap
 
 Planned features and improvements:
