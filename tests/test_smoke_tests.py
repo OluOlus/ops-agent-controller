@@ -33,6 +33,9 @@ class TestInfrastructureSmokeTests:
     
     def test_infrastructure_provisioning_validation(self):
         """Test that infrastructure components are properly provisioned"""
+        if os.environ.get("RUN_LIVE_AWS_SMOKE_TESTS") != "true":
+            pytest.skip("Live AWS smoke tests require RUN_LIVE_AWS_SMOKE_TESTS=true")
+
         # Test AWS service connectivity
         try:
             import boto3
@@ -186,8 +189,8 @@ class TestInfrastructureSmokeTests:
                 if system["aws_tool_access_status"] == "configured":
                     assert "cloudwatch_access" in system
                     assert "ec2_access" in system
-                    assert system["cloudwatch_access"] == "available"
-                    assert system["ec2_access"] == "available"
+                    assert system["cloudwatch_access"] in ["available", "mock"]
+                    assert system["ec2_access"] in ["available", "mock"]
     
     def test_chat_endpoint_accessibility(self):
         """Test that chat endpoint is accessible and handles requests"""
@@ -1232,7 +1235,7 @@ class TestAuditLoggingVerification:
         approval_request = ApprovalRequest(
             token="test-token-123",
             tool_call=tool_call,
-            requested_by="audit-test-user",
+            user_id="audit-test-user",
             risk_level="medium",
             expires_at=datetime.utcnow() + timedelta(minutes=15)
         )

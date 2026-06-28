@@ -445,9 +445,17 @@ class ToolGuardrails:
         # Validate tool arguments against schema
         if policy.schema:
             try:
+                for required_key in policy.schema.get("required", []):
+                    if required_key not in tool_call.args:
+                        raise ValidationError(f"{required_key} is a required property")
+                for key, value in tool_call.args.items():
+                    allowed_values = policy.schema.get("properties", {}).get(key, {}).get("enum")
+                    if allowed_values and value not in allowed_values:
+                        raise ValidationError(f"{value!r} is not one of {allowed_values}")
                 validate(instance=tool_call.args, schema=policy.schema)
             except ValidationError as e:
-                raise GuardrailViolation(f"Tool arguments validation failed: {e.message}")
+                message = getattr(e, "message", str(e))
+                raise GuardrailViolation(f"Tool arguments validation failed: {message}")
         
         # Validate resource tags if required
         if policy.requires_resource_tags:

@@ -726,6 +726,8 @@ class WebChannelAdapter(ChannelAdapter):
         
         # Determine action description based on execution mode
         mode_descriptions = {
+            ExecutionMode.LOCAL_MOCK: "SIMULATE (mock)",
+            ExecutionMode.DRY_RUN: "SIMULATE (dry-run)",
             ExecutionMode.SANDBOX_LIVE: "EXECUTE"
         }
         mode_description = mode_descriptions.get(execution_mode, "EXECUTE")
@@ -883,7 +885,7 @@ class WebChannelAdapter(ChannelAdapter):
             channel_data["correlation_id"] = correlation_id
         
         response = ChannelResponse(
-            message=f"Error: {error_message}",
+            message=f"❌ Error: {error_message}",
             channel_data=channel_data,
             correlation_id=correlation_id
         )
@@ -908,9 +910,9 @@ class WebChannelAdapter(ChannelAdapter):
         aws_status = status_data.get("aws_tool_access_status", "unknown")
         
         status_emoji = {
-            "configured": "OK",
-            "not_configured": "WARNING",
-            "error": "ERROR"
+            "configured": "✅",
+            "not_configured": "⚠️",
+            "error": "❌"
         }
         
         message = (

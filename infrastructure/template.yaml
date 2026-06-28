@@ -32,7 +32,7 @@ Parameters:
   
   BedrockModelId:
     Type: String
-    Default: anthropic.claude-3-sonnet-20240229-v1:0
+    Default: anthropic.claude-3-5-sonnet-20241022-v2:0
     Description: Bedrock model ID for LLM provider
   
   ApiKeyParameterName:
@@ -81,17 +81,42 @@ Parameters:
     Default: ''
     Description: Amazon Q Business Session ID for conversation continuity (optional)
 
+  VpcId:
+    Type: String
+    Default: ''
+    Description: VPC ID for test resources (leave empty to skip VPC-based test resources)
+
+  SubnetId:
+    Type: String
+    Default: ''
+    Description: Subnet ID for test EC2 instance (required when CreateTestResources=true)
+
+  CorsAllowedOrigin:
+    Type: String
+    Default: 'null'
+    Description: Allowed CORS origin for browser clients (e.g. https://app.example.com). Use 'null' to restrict all cross-origin requests.
+
+  AlarmEmailEndpoint:
+    Type: String
+    Default: ''
+    Description: Email address for CloudWatch alarm notifications (optional)
+
 Conditions:
   EnableEncryption: !Equals [!Ref EnableDynamoDBEncryption, 'true']
-  CreateTestResources: !Equals [!Ref CreateTestResources, 'true']
+  CreateTestResources: !And
+    - !Equals [!Ref CreateTestResources, 'true']
+    - !Not [!Equals [!Ref SubnetId, '']]
+    - !Not [!Equals [!Ref VpcId, '']]
   HasCustomAwsAccountId: !Not [!Equals [!Ref AwsAccountId, '']]
   HasAmazonQIntegration: !Not [!Equals [!Ref AmazonQAppId, '']]
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmailEndpoint, '']]
 
 Globals:
   Function:
-    Timeout: 30
-    MemorySize: 512
+    Timeout: 60
+    MemorySize: 1024
     Runtime: python3.11
+    Tracing: Active
     Environment:
       Variables:
         EXECUTION_MODE: !Ref ExecutionMode
@@ -188,7 +213,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/aws/apigateway/opsagent-${Environment}'
-      RetentionInDays: 30
+      RetentionInDays: 90
       KmsKeyId: !GetAtt OpsAgentKMSKey.Arn
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
@@ -292,6 +317,7 @@ Resources:
             - HasAmazonQIntegration
             - !Ref AmazonQSessionId
             - !Ref AWS::NoValue
+          CORS_ALLOWED_ORIGIN: !Ref CorsAllowedOrigin
       Tags:
         Project: OpsAgent
         Environment: !Ref Environment
@@ -503,10 +529,11 @@ Resources:
             Action:
               - bedrock:InvokeModel
               - bedrock:InvokeModelWithResponseStream
-            Resource: 
+            Resource:
+              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0'
+              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0'
               - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0'
               - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0'
-              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-instant-v1'
           
           # Amazon Q Business permissions for hybrid LLM integration
           - Effect: Allow
@@ -655,6 +682,114 @@ Resources:
             }
           ]
         }
+
+  # --- CloudWatch Alarms ---
+
+  AlarmHighErrorRate:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'OpsAgent-${Environment}-HighErrorRate'
+      AlarmDescription: 'Lambda error rate exceeded 5 errors in 10 minutes'
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref OpsAgentFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref NotificationTopic
+      OKActions:
+        - !Ref NotificationTopic
+
+  AlarmHighLatency:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'OpsAgent-${Environment}-HighLatency'
+      AlarmDescription: 'Lambda average duration exceeded 10 seconds'
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref OpsAgentFunction
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 10000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref NotificationTopic
+
+  AlarmThrottles:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'OpsAgent-${Environment}-Throttles'
+      AlarmDescription: 'Lambda throttling detected'
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref OpsAgentFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref NotificationTopic
+
+  AlarmApi5xxErrors:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'OpsAgent-${Environment}-Api5xxErrors'
+      AlarmDescription: 'API Gateway 5XX error rate elevated'
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiName
+          Value: !Sub 'opsagent-controller-${Environment}'
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref NotificationTopic
+
+  AlarmDLQMessages:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'OpsAgent-${Environment}-DLQMessages'
+      AlarmDescription: 'Messages arriving in the dead-letter queue'
+      Namespace: AWS/SQS
+      MetricName: NumberOfMessagesSent
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt DeadLetterQueue.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref NotificationTopic
+
+  # Optional: email subscription for alarms
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref NotificationTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmailEndpoint
 
   # DynamoDB table for incident records
   IncidentTable:
@@ -854,14 +989,15 @@ Resources:
       KeyType: API_KEY
       UsagePlanId: !Ref OpsAgentUsagePlan
 
-  # Store API Key in SSM Parameter Store
+  # Store API Key ID in SSM Parameter Store (value is the key ID, not the secret)
+  # To retrieve the actual key value use: aws apigateway get-api-key --api-key <id> --include-value
   OpsAgentApiKeyParameter:
     Type: AWS::SSM::Parameter
     Properties:
       Name: !Sub '/opsagent/plugin-api-key-${Environment}'
-      Type: SecureString
+      Type: String
       Value: !Ref OpsAgentApiKey
-      Description: 'API Key for Amazon Q Business OpsAgent Plugin'
+      Description: 'API Key ID for Amazon Q Business OpsAgent Plugin (use apigateway get-api-key --include-value to retrieve the secret)'
       Tags:
         Project: OpsAgent
         Environment: !Ref Environment
@@ -903,7 +1039,7 @@ Resources:
       IamInstanceProfile: !Ref TestInstanceProfile
       SecurityGroupIds:
         - !Ref TestSecurityGroup
-      SubnetId: subnet-023cf72072982239e
+      SubnetId: !Ref SubnetId
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
@@ -951,7 +1087,7 @@ Resources:
     Condition: CreateTestResources
     Properties:
       GroupDescription: Security group for OpsAgent test instance
-      VpcId: vpc-084537f64f2a1ea5d
+      VpcId: !Ref VpcId
       Tags:
         - Key: Name
           Value: !Sub 'opsagent-test-sg-${Environment}'

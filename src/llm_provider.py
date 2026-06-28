@@ -505,6 +505,10 @@ def create_llm_provider(execution_mode: ExecutionMode, **kwargs) -> LLMProvider:
     Factory function to create appropriate LLM provider based on execution mode
     Requirements: 7.1, 7.4
     """
+    if execution_mode == ExecutionMode.LOCAL_MOCK:
+        logger.info("Creating mock LLM provider for LOCAL_MOCK mode")
+        return MockLLMProvider()
+
     # Check if Amazon Q integration is configured
     amazon_q_app_id = kwargs.get('amazon_q_app_id') or os.environ.get('AMAZON_Q_APP_ID')
     

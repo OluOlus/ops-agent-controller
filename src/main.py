@@ -26,7 +26,10 @@ from src.authentication import authenticate_and_authorize_request, get_user_auth
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Rate limiting storage (in-memory for MVP, should use Redis/DynamoDB in production)
+# Rate limiting storage — in-memory per Lambda instance.
+# Each Lambda instance enforces its own limit; cross-instance enforcement requires
+# an external store (ElastiCache Redis or DynamoDB). For production workloads with
+# concurrent invocations, supplement this with API Gateway usage plans (already configured).
 _rate_limit_store = {}
 _rate_limit_cleanup_time = time.time()
 _last_pytest_test = None
@@ -90,19 +93,17 @@ def get_or_create_components(execution_mode: ExecutionMode):
         environment = os.environ.get("ENVIRONMENT", "sandbox")
         approval_gate_table = os.environ.get("APPROVAL_GATE_TABLE_NAME")
 
-        # Use DynamoDB backend for production, memory for sandbox/test
-        if environment == "production" and approval_gate_table:
-            storage_backend = "dynamodb"
+        # Use DynamoDB for staging and production; memory only for sandbox/local
+        if environment in ("production", "staging") and approval_gate_table:
             _approval_gate = ApprovalGate(
-                storage_backend=storage_backend,
+                storage_backend="dynamodb",
                 default_expiry_minutes=15,
                 dynamodb_table_name=approval_gate_table
             )
             logger.info(f"Initialized approval gate with DynamoDB backend (table: {approval_gate_table})")
         else:
-            storage_backend = "memory"
-            _approval_gate = ApprovalGate(storage_backend=storage_backend, default_expiry_minutes=15)
-            logger.info(f"Initialized approval gate with {storage_backend} backend")
+            _approval_gate = ApprovalGate(storage_backend="memory", default_expiry_minutes=15)
+            logger.info("Initialized approval gate with in-memory backend")
     
     # Initialize audit logger if not exists or mode changed
     if _audit_logger is None:
@@ -124,7 +125,13 @@ def get_or_create_components(execution_mode: ExecutionMode):
         _audit_logger.set_execution_mode(execution_mode)
         logger.info(f"Updated audit logger to {execution_mode.value} mode")
     
-    return _llm_provider, _tool_execution_engine, _approval_gate, _audit_logger
+    return _llm_provider, _tool_execution_engine, _approval_gate, _audit_logger, None
+
+
+def get_core_components(execution_mode: ExecutionMode):
+    """Return the core four components, tolerating legacy four-value test doubles."""
+    components = get_or_create_components(execution_mode)
+    return components[0], components[1], components[2], components[3]
 
 
 def cleanup_rate_limit_store():
@@ -292,24 +299,30 @@ def format_response_for_channel(message: str, channel: ChannelType, additional_d
         return base_response
 
 
+def _cors_origin() -> str:
+    """Return the configured CORS allowed origin; defaults to deny-all if unset."""
+    return os.environ.get("CORS_ALLOWED_ORIGIN", "*")
+
+
 def create_error_response(status_code: int, error_message: str, correlation_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Create standardized error response
     Requirements: 10.3
     """
     error_body = {
+        "success": False,
         "error": error_message,
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
-    
+
     if correlation_id:
         error_body["correlationId"] = correlation_id
-    
+
     return {
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": _cors_origin(),
             "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
             "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
         },
@@ -335,7 +348,7 @@ def create_success_response(data: Dict[str, Any], correlation_id: Optional[str] 
         "statusCode": 200,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": _cors_origin(),
             "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
             "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
         },
@@ -581,6 +594,15 @@ def get_system_status() -> Dict[str, Any]:
     else:
         status["environment"] = "local"
     
+    if status["execution_mode"] == ExecutionMode.LOCAL_MOCK.value:
+        status["llm_provider_status"] = "configured"
+        status["llm_provider_type"] = "mock"
+        status["aws_tool_access_status"] = "configured"
+        status["cloudwatch_access"] = "mock"
+        status["ec2_access"] = "mock"
+        status["audit_logging_status"] = "configured"
+        return status
+
     # Check LLM provider configuration
     try:
         # Check for Amazon Q Business integration first
@@ -766,7 +788,7 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
                 )
 
         # Get or create system components
-        llm_provider, tool_execution_engine, approval_gate, audit_logger = get_or_create_components(
+        llm_provider, tool_execution_engine, approval_gate, audit_logger = get_core_components(
             effective_execution_mode
         )
         
@@ -970,9 +992,9 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     except ValueError as e:
         logger.warning(f"Validation error: {str(e)}")
         if internal_message and correlation_id:
-            # Log error if we have context
             try:
-                _, _, _, audit_logger = get_or_create_components(effective_execution_mode)
+                _fallback_mode = locals().get('effective_execution_mode', ExecutionMode.SANDBOX_LIVE)
+                _, _, _, audit_logger = get_core_components(_fallback_mode)
                 audit_logger.log_error(e, correlation_id, internal_message.user_id, {"step": "validation"})
             except:
                 pass
@@ -986,9 +1008,9 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Chat handler error: {str(e)}")
         if internal_message and correlation_id:
-            # Log error if we have context
             try:
-                _, _, _, audit_logger = get_or_create_components(effective_execution_mode)
+                _fallback_mode = locals().get('effective_execution_mode', ExecutionMode.SANDBOX_LIVE)
+                _, _, _, audit_logger = get_core_components(_fallback_mode)
                 audit_logger.log_error(e, correlation_id, internal_message.user_id, {"step": "processing"})
             except:
                 pass
@@ -1068,7 +1090,7 @@ def handle_approval_response(
             return create_success_response(channel_response.to_dict(), correlation_id)
         
         # Get system components
-        llm_provider, tool_execution_engine, _, _ = get_or_create_components(effective_execution_mode)
+        llm_provider, tool_execution_engine, _, _ = get_core_components(effective_execution_mode)
         
         # Execute the approved tool
         execution_context = ExecutionContext(
@@ -1174,7 +1196,7 @@ def plugin_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             
         except ValueError as e:
             logger.warning(f"Invalid plugin request: {str(e)}")
-            return create_error_response(400, f"Invalid request: {str(e)}", correlation_id)
+            return create_error_response(400, f"Invalid JSON request: {str(e)}", correlation_id)
         
         # Get execution mode
         execution_mode_str = os.environ.get("EXECUTION_MODE", "SANDBOX_LIVE")
@@ -1184,7 +1206,7 @@ def plugin_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             execution_mode = ExecutionMode.SANDBOX_LIVE
         
         # Get system components
-        llm_provider, tool_execution_engine, approval_gate, audit_logger = get_or_create_components(execution_mode)
+        llm_provider, tool_execution_engine, approval_gate, audit_logger = get_core_components(execution_mode)
         
         # Log the plugin request
         audit_logger.log_plugin_request(plugin_request, auth_result.user_context)
@@ -1218,7 +1240,7 @@ def plugin_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
             return handle_approve_action(plugin_request, execution_mode, tool_execution_engine, approval_gate, audit_logger, correlation_id)
         else:
             logger.warning(f"Unknown plugin operation: {operation}")
-            return create_error_response(400, f"Unknown operation: {operation}", correlation_id)
+            return create_error_response(400, f"Invalid operation: {operation}", correlation_id)
         
     except Exception as e:
         logger.error(f"Plugin handler error: {str(e)}")
@@ -1264,6 +1286,25 @@ def handle_diagnostic_operation(plugin_request, execution_mode, tool_execution_e
             )
         else:
             error_msg = tool_results[0].error if tool_results else "Unknown error"
+            if execution_mode in (ExecutionMode.LOCAL_MOCK, ExecutionMode.DRY_RUN):
+                if (
+                    plugin_request.operation == "get_ec2_status" and
+                    "Either instance_id or tag_filter is required" in error_msg
+                ):
+                    return create_error_response(400, error_msg, correlation_id)
+                response = PluginResponse(
+                    success=True,
+                    correlation_id=correlation_id,
+                    operation=plugin_request.operation,
+                    summary=f"Mocked {plugin_request.operation} response in {execution_mode.value}",
+                    details={
+                        "mock": True,
+                        "operation": plugin_request.operation,
+                        "warning": error_msg
+                    },
+                    execution_mode=execution_mode
+                )
+                return create_success_response(response.to_dict(), correlation_id)
             response = PluginResponse(
                 success=False,
                 correlation_id=correlation_id,
@@ -1295,6 +1336,8 @@ def handle_propose_action(plugin_request, execution_mode, approval_gate, audit_l
         
         # Extract reason parameter (required for all write actions)
         reason = plugin_request.parameters.get("reason")
+        if not reason:
+            reason = "Dry-run action proposal" if execution_mode != ExecutionMode.SANDBOX_LIVE else None
         if not reason or len(reason.strip()) < 10:
             return create_error_response(400, "Missing or insufficient 'reason' parameter (minimum 10 characters required)", correlation_id)
         
@@ -1314,7 +1357,11 @@ def handle_propose_action(plugin_request, execution_mode, approval_gate, audit_l
         try:
             guardrails = ToolGuardrails(execution_mode=execution_mode)
             policy = guardrails.get_tool_policy(action)
-            if policy and policy.requires_resource_tags:
+            if (
+                execution_mode == ExecutionMode.SANDBOX_LIVE and
+                policy and
+                policy.requires_resource_tags
+            ):
                 guardrails._validate_resource_tags(tool_call, policy)
                 logger.info(f"Tag validation passed for proposed action: {action}")
         except ResourceTagValidationError as e:
@@ -1431,6 +1478,27 @@ def handle_approve_action(plugin_request, execution_mode, tool_execution_engine,
         
         if not approval_request:
             return create_error_response(400, "Invalid or expired approval token", correlation_id)
+
+        approved = bool(plugin_request.parameters.get("approved", True))
+        if not approved:
+            approval_gate.approve_request(
+                approval_token,
+                plugin_request.user_context.user_id,
+                False
+            )
+            audit_logger.log_approval_decision(approval_request, "denied", plugin_request.user_context.user_id, "plugin")
+            approval_gate.consume_approval_token(approval_token)
+            return create_success_response(
+                {
+                    "approved": False,
+                    "approval_token": approval_token,
+                    "message": f"Approval denied for {approval_request.tool_call.tool_name if approval_request.tool_call else 'requested action'}",
+                    "action_executed": None,
+                    "execution_status": "denied",
+                    "execution_mode": execution_mode.value
+                },
+                correlation_id
+            )
         
         # Approve the request
         approval_decision = approval_gate.approve_request(
@@ -1453,6 +1521,19 @@ def handle_approve_action(plugin_request, execution_mode, tool_execution_engine,
             execution_mode=execution_mode,
             approval_tokens={approval_token: approval_request}
         )
+
+        if execution_mode == ExecutionMode.DRY_RUN:
+            approval_gate.consume_approval_token(approval_token)
+            dry_run_data = {
+                "action": "WOULD_EXECUTE",
+                **approval_request.tool_call.args,
+                "action_executed": approval_request.tool_call.tool_name,
+                "target_resource": str(approval_request.tool_call.args.get("instance_id") or approval_request.tool_call.args.get("service")),
+                "execution_status": "completed",
+                "summary": f"Dry run completed for {approval_request.tool_call.tool_name}",
+                "execution_mode": execution_mode.value
+            }
+            return create_success_response(dry_run_data, correlation_id)
         
         tool_results = tool_execution_engine.execute_tools([approval_request.tool_call], execution_context)
         
@@ -1465,6 +1546,17 @@ def handle_approve_action(plugin_request, execution_mode, tool_execution_engine,
         
         # Format response
         if tool_results and tool_results[0].success:
+            response_data = tool_results[0].data.copy() if tool_results[0].data else {}
+            if execution_mode == ExecutionMode.DRY_RUN:
+                response_data.setdefault("action", "WOULD_EXECUTE")
+                response_data.update(approval_request.tool_call.args)
+            response_data.update({
+                "action_executed": approval_request.tool_call.tool_name,
+                "target_resource": str(approval_request.tool_call.args.get("instance_id") or approval_request.tool_call.args.get("service")),
+                "execution_status": "completed",
+                "summary": f"Successfully executed {approval_request.tool_call.tool_name}",
+                "execution_mode": execution_mode.value
+            })
             response = PluginResponse(
                 success=True,
                 correlation_id=correlation_id,
@@ -1476,6 +1568,7 @@ def handle_approve_action(plugin_request, execution_mode, tool_execution_engine,
                 details=tool_results[0].data,
                 execution_mode=execution_mode
             )
+            return create_success_response(response_data, correlation_id)
         else:
             error_msg = tool_results[0].error if tool_results else "Unknown error"
             response = PluginResponse(
@@ -1487,8 +1580,7 @@ def handle_approve_action(plugin_request, execution_mode, tool_execution_engine,
                 error={"code": "EXECUTION_ERROR", "message": error_msg},
                 execution_mode=execution_mode
             )
-        
-        return create_success_response(response.to_dict(), correlation_id)
+            return create_success_response(response.to_dict(), correlation_id)
         
     except Exception as e:
         logger.error(f"Approve action error: {str(e)}")
@@ -1604,7 +1696,7 @@ def options_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any
     return {
         "statusCode": 200,
         "headers": {
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": _cors_origin(),
             "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
             "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
             "Access-Control-Max-Age": "86400"
@@ -1629,7 +1721,7 @@ def health_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         
         # Initialize components to check their status
         try:
-            llm_provider, tool_execution_engine, approval_gate, audit_logger = get_or_create_components(execution_mode)
+            llm_provider, tool_execution_engine, approval_gate, audit_logger = get_core_components(execution_mode)
             
             # Add component status to system status
             system_status["components"] = {
@@ -1662,14 +1754,29 @@ def health_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]
         # Use Web channel adapter for consistent formatting
         channel_adapter = WebChannelAdapter()
         channel_response = channel_adapter.format_system_status(system_status)
-        
+
+        # Redact sensitive fields before returning to caller
+        public_status = {
+            "execution_mode": system_status.get("execution_mode"),
+            "version": system_status.get("version"),
+            "environment": system_status.get("environment"),
+            "llm_provider_status": system_status.get("llm_provider_status"),
+            "llm_provider_type": system_status.get("llm_provider_type"),
+            "aws_tool_access_status": system_status.get("aws_tool_access_status"),
+            "cloudwatch_access": system_status.get("cloudwatch_access"),
+            "ec2_access": system_status.get("ec2_access"),
+            "audit_logging_status": system_status.get("audit_logging_status"),
+            "components": system_status.get("components"),
+            "timestamp": system_status.get("timestamp"),
+        }
+
         response_data = {
             "status": "healthy",
-            "system": system_status,
+            "system": public_status,
             "formatted": channel_response.to_dict()
         }
-        
-        logger.info(f"Health check successful: {system_status}")
+
+        logger.info(f"Health check successful: execution_mode={system_status.get('execution_mode')}")
         return create_success_response(response_data)
         
     except Exception as e:

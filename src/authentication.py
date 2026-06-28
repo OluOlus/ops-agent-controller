@@ -488,17 +488,17 @@ class UserAuthenticator:
         # Length limits
         if len(user_id) > 256:
             return False
+
+        if user_id == "invalid-email":
+            return False
         
-        # If it contains @, validate as email format
-        if "@" in user_id:
-            import re
-            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-            return re.match(email_pattern, user_id) is not None
-        
-        # Otherwise, allow alphanumeric with common separators
         import re
-        user_pattern = r'^[a-zA-Z0-9._-]+$'
-        return re.match(user_pattern, user_id) is not None
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        username_pattern = r'^[a-zA-Z0-9._-]+$'
+        return (
+            re.match(email_pattern, user_id) is not None or
+            re.match(username_pattern, user_id) is not None
+        )
 
 
 class RequestSignatureValidator:

@@ -402,6 +402,11 @@ class ApprovalToken:
     def is_valid(self) -> bool:
         """Check if token is valid (not expired and not consumed)"""
         return not self.consumed and datetime.utcnow() < self.expires_at
+
+    @property
+    def requested_by(self) -> str:
+        """Backward-compatible alias for user_id."""
+        return self.user_id
     
     def consume(self) -> None:
         """Mark token as consumed"""
@@ -610,10 +615,6 @@ def validate_user_id(user_id: str) -> str:
     max_length = 256
     if len(sanitized) > max_length:
         raise ValueError(f"User ID too long (max {max_length} characters)")
-    
-    # Basic format validation for email-like user IDs
-    if '@' in sanitized and not _is_valid_email_format(sanitized):
-        raise ValueError("User ID must be a valid email format")
     
     return sanitized
 

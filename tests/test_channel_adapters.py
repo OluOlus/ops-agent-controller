@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
 from src.channel_adapters import (
-    WebChannelAdapter, ChannelAdapter, ChannelResponse,
+    WebChannelAdapter, TeamsChannelAdapter, ChannelAdapter, ChannelResponse,
     create_channel_adapter
 )
 from src.models import (
@@ -98,7 +98,7 @@ class TestWebChannelAdapter:
         
         assert message.user_id == "test-user"
         assert message.message_text == "Hello, OpsAgent!"
-        assert message.execution_mode == ExecutionMode.LOCAL_MOCK  # default
+        assert message.execution_mode == ExecutionMode.SANDBOX_LIVE  # default
     
     def test_normalize_message_missing_required_fields(self):
         """Test normalizing request with missing required fields"""
@@ -146,8 +146,8 @@ class TestWebChannelAdapter:
         with patch('src.channel_adapters.logger') as mock_logger:
             message = self.adapter.normalize_message(raw_request)
             
-            # Should default to LOCAL_MOCK
-            assert message.execution_mode == ExecutionMode.LOCAL_MOCK
+            # Should default to SANDBOX_LIVE on invalid mode
+            assert message.execution_mode == ExecutionMode.SANDBOX_LIVE
             mock_logger.warning.assert_called_once()
     
     def test_format_response_basic(self):
@@ -190,7 +190,7 @@ class TestWebChannelAdapter:
         approval_request = ApprovalRequest(
             token="approval-token-123",
             expires_at=datetime.utcnow() + timedelta(minutes=15),
-            requested_by="test-user",
+            user_id="test-user",
             tool_call=tool_call,
             risk_level="medium",
             correlation_id="test-corr-123"
@@ -252,7 +252,7 @@ class TestWebChannelAdapter:
         approval_request = ApprovalRequest(
             token="approval-token-123",
             expires_at=datetime.utcnow() + timedelta(minutes=15),
-            requested_by="test-user",
+            user_id="test-user",
             tool_call=tool_call,
             risk_level="high"
         )
@@ -285,7 +285,7 @@ class TestWebChannelAdapter:
         approval_request = ApprovalRequest(
             token="approval-token-123",
             expires_at=datetime.utcnow() - timedelta(minutes=5),  # Expired
-            requested_by="test-user",
+            user_id="test-user",
             tool_call=tool_call,
             risk_level="low"
         )
@@ -301,7 +301,7 @@ class TestWebChannelAdapter:
         approval_request = ApprovalRequest(
             token="approval-token-123",
             expires_at=datetime.utcnow() + timedelta(minutes=15),
-            requested_by="test-user",
+            user_id="test-user",
             tool_call=None  # Missing tool call
         )
         
@@ -392,10 +392,12 @@ class TestChannelAdapterFactory:
         assert isinstance(adapter, WebChannelAdapter)
         assert adapter.channel_type == ChannelType.WEB
     
-    def test_create_teams_channel_adapter_not_implemented(self):
-        """Test creating Teams channel adapter (not yet implemented)"""
-        with pytest.raises(NotImplementedError, match="Teams channel adapter not yet implemented"):
-            create_channel_adapter(ChannelType.TEAMS)
+    def test_create_teams_channel_adapter(self):
+        """Test creating Teams channel adapter"""
+        adapter = create_channel_adapter(ChannelType.TEAMS)
+
+        assert isinstance(adapter, TeamsChannelAdapter)
+        assert adapter.channel_type == ChannelType.TEAMS
     
     def test_create_slack_channel_adapter_not_implemented(self):
         """Test creating Slack channel adapter (not yet implemented)"""
@@ -480,7 +482,7 @@ class TestChannelAdapterIntegration:
         approval_request = ApprovalRequest(
             token="integration-approval-token",
             expires_at=datetime.utcnow() + timedelta(minutes=10),
-            requested_by="integration-test-user",
+            user_id="integration-test-user",
             tool_call=tool_call,
             risk_level="medium"
         )

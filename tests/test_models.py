@@ -665,9 +665,9 @@ class TestUtilityFunctions:
         result = validate_user_id("user@company.com")
         assert result == "user@company.com"
         
-        # Invalid email format
-        with pytest.raises(ValueError, match="User ID must be a valid email format"):
-            validate_user_id("invalid-email@")
+        # Non-email identifiers are accepted for chat and plugin identities
+        result = validate_user_id("invalid-email@")
+        assert result == "invalid-email@"
         
         # Non-email format (should pass)
         result = validate_user_id("user123")

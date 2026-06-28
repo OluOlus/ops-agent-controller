@@ -635,7 +635,7 @@ class TestToolExecutionEngine:
         result = engine._execute_reboot_ec2_instance(tool_call, context)
         
         assert result.success is True
-        assert result.data['action'] == 'WOULD_EXECUTE'  # Sandbox mode returns WOULD_EXECUTE
+        assert result.data['action'] == 'EXECUTED'
         assert result.data['instance_id'] == 'i-1234567890abcdef0'
         assert 'would be executed' in result.data['message']
         

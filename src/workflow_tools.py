@@ -310,6 +310,7 @@ class ChannelNotificationTool:
                 'text': text,
                 'channel_id': channel_id,
                 'webhook_url': webhook_url,
+                'delivery_method': 'webhook' if webhook_url else 'channel',
                 'posted_by': tool_call.user_id or 'mock-user@company.com',
                 'posted_at': posted_at.isoformat() + 'Z',
                 'delivery_status': 'sent',
@@ -319,3 +320,6 @@ class ChannelNotificationTool:
             execution_mode=self.execution_mode,
             correlation_id=correlation_id
         )
+
+
+ChannelPostingTool = ChannelNotificationTool

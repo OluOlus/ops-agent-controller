@@ -449,7 +449,8 @@ class EC2DescribeTool:
         self.execution_mode = execution_mode
         self.ec2_client = None
         
-        self._initialize_client()
+        if execution_mode != ExecutionMode.LOCAL_MOCK:
+            self._initialize_client()
     
     def _initialize_client(self) -> None:
         """Initialize EC2 client"""

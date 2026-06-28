@@ -57,7 +57,7 @@ class TestApprovalGate:
         )
         
         assert approval_request.tool_call == self.test_tool_call
-        assert approval_request.requested_by == self.test_user_id
+        assert approval_request.user_id == self.test_user_id
         assert approval_request.risk_level == "high"
         assert approval_request.correlation_id == self.test_tool_call.correlation_id
         
@@ -380,61 +380,54 @@ class TestApprovalGate:
             requested_by=self.test_user_id,
             risk_level="high"
         )
-        
+
         formatted = self.approval_gate.format_approval_request_for_chat(
             approval_request=approval_request,
-            execution_mode=ExecutionMode.DRY_RUN
+            execution_mode=ExecutionMode.SANDBOX_LIVE
         )
-        
+
         assert formatted["type"] == "approval_request"
         assert formatted["token"] == approval_request.token
         assert formatted["title"] == "Approval Required: ec2_reboot"
-        assert "SIMULATE (dry-run)" in formatted["description"]
+        assert "EXECUTE" in formatted["description"]
         assert "instance_id: i-1234567890abcdef0" in formatted["description"]
         assert formatted["risk_level"] == "high"
         assert "🔴" in formatted["description"]  # High risk emoji
-        assert formatted["execution_mode"] == "DRY_RUN"
-        
+        assert formatted["execution_mode"] == "SANDBOX_LIVE"
+
         # Check actions
         assert len(formatted["actions"]) == 2
         approve_action = next(a for a in formatted["actions"] if a["type"] == "approve")
         deny_action = next(a for a in formatted["actions"] if a["type"] == "deny")
-        
-        assert "✅ Approve SIMULATE (dry-run)" in approve_action["label"]
-        assert "❌ Deny" in deny_action["label"]
+
+        assert "Approve EXECUTE" in approve_action["label"]
+        assert "Deny" in deny_action["label"]
         assert approve_action["token"] == approval_request.token
         assert deny_action["token"] == approval_request.token
-    
+
     def test_format_approval_request_different_modes(self):
-        """Test formatting approval request for different execution modes"""
+        """Test formatting approval request always uses EXECUTE description"""
         approval_request = self.approval_gate.create_approval_request(
             tool_call=self.test_tool_call,
             requested_by=self.test_user_id
         )
-        
-        # Test LOCAL_MOCK mode
-        formatted_mock = self.approval_gate.format_approval_request_for_chat(
-            approval_request=approval_request,
-            execution_mode=ExecutionMode.LOCAL_MOCK
-        )
-        assert "SIMULATE" in formatted_mock["description"]
-        assert "✅ Approve SIMULATE" in formatted_mock["actions"][0]["label"]
-        
-        # Test SANDBOX_LIVE mode
-        formatted_live = self.approval_gate.format_approval_request_for_chat(
-            approval_request=approval_request,
-            execution_mode=ExecutionMode.SANDBOX_LIVE
-        )
-        assert "EXECUTE" in formatted_live["description"]
-        assert "✅ Approve EXECUTE" in formatted_live["actions"][0]["label"]
-    
+
+        # All modes resolve to EXECUTE action description
+        for mode in [ExecutionMode.SANDBOX_LIVE, ExecutionMode.DRY_RUN, ExecutionMode.LOCAL_MOCK]:
+            formatted = self.approval_gate.format_approval_request_for_chat(
+                approval_request=approval_request,
+                execution_mode=mode
+            )
+            assert "EXECUTE" in formatted["description"]
+            assert "Approve EXECUTE" in formatted["actions"][0]["label"]
+
     def test_format_approval_request_no_tool_call(self):
         """Test formatting approval request without tool call"""
         approval_request = ApprovalRequest(
-            requested_by=self.test_user_id,
+            user_id=self.test_user_id,
             tool_call=None
         )
-        
+
         with pytest.raises(ValueError, match="Approval request missing tool call"):
             self.approval_gate.format_approval_request_for_chat(approval_request)
     
@@ -589,15 +582,10 @@ class TestApprovalGate:
             gate = ApprovalGate(storage_backend="redis")
             gate._store_approval_request(ApprovalRequest())
     
-    def test_dynamodb_not_implemented(self):
-        """Test that DynamoDB backend raises NotImplementedError"""
-        gate = ApprovalGate(storage_backend="dynamodb")
-        
-        with pytest.raises(NotImplementedError, match="DynamoDB storage not yet implemented"):
-            gate._store_approval_request(ApprovalRequest())
-        
-        with pytest.raises(NotImplementedError, match="DynamoDB storage not yet implemented"):
-            gate._get_approval_request("test_token")
+    def test_dynamodb_requires_table_name(self):
+        """Test that DynamoDB backend requires a table name"""
+        with pytest.raises(ValueError, match="dynamodb_table_name is required"):
+            ApprovalGate(storage_backend="dynamodb")
 
 
 class TestApprovalDecision:

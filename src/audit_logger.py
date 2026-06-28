@@ -90,6 +90,12 @@ class AuditLogger:
     
     def _initialize_clients(self) -> None:
         """Initialize AWS clients for CloudWatch and DynamoDB"""
+        if self.execution_mode == ExecutionMode.LOCAL_MOCK:
+            logger.info("Skipping audit logger AWS client initialization in LOCAL_MOCK mode")
+            self.cloudwatch_logs_client = None
+            self.dynamodb_client = None
+            return
+
         try:
             self.cloudwatch_logs_client = boto3.client('logs')
             logger.info("CloudWatch Logs client initialized successfully")
@@ -516,6 +522,6 @@ class AuditLogger:
         
         self.execution_mode = execution_mode
         
-        # Reinitialize clients if needed
-        if not self.cloudwatch_logs_client:
-            self._initialize_clients()
+        self.cloudwatch_logs_client = None
+        self.dynamodb_client = None
+        self._initialize_clients()

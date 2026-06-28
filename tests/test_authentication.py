@@ -417,7 +417,7 @@ class TestAuthenticationIntegration:
         """Set up test fixtures"""
         self.correlation_id = generate_correlation_id()
     
-    @patch('src.authentication.get_signature_validator')
+    @patch('authentication.get_signature_validator')
     @patch('src.authentication.get_user_authenticator')
     def test_authenticate_and_authorize_request_success(self, mock_get_authenticator, mock_get_validator):
         """Test successful end-to-end authentication and authorization"""
@@ -448,7 +448,7 @@ class TestAuthenticationIntegration:
         assert result.user_context is not None
         assert result.user_context.user_id == "test.user@company.com"
     
-    @patch('src.authentication.get_signature_validator')
+    @patch('authentication.get_signature_validator')
     def test_authenticate_and_authorize_request_signature_failure(self, mock_get_validator):
         """Test authentication failure due to invalid signature"""
         # Mock signature validator to fail

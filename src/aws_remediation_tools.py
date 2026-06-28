@@ -28,7 +28,8 @@ class EC2RebootTool:
         self.execution_mode = execution_mode
         self.ec2_client = None
         
-        self._initialize_client()
+        if execution_mode != ExecutionMode.LOCAL_MOCK:
+            self._initialize_client()
     
     def _initialize_client(self) -> None:
         """Initialize EC2 client"""
@@ -68,7 +69,10 @@ class EC2RebootTool:
                 )
             
             # Validate instance ID format
-            if not self._validate_instance_id_format(instance_id):
+            if (
+                not instance_id.startswith("i-") or
+                (self.execution_mode == ExecutionMode.SANDBOX_LIVE and not self._validate_instance_id_format(instance_id))
+            ):
                 error_msg = f"Invalid instance ID format: {instance_id}"
                 logger.error(error_msg)
                 return ToolResult(
@@ -135,16 +139,32 @@ class EC2RebootTool:
             ToolResult indicating what would be executed
         """
         instance_id = tool_call.args['instance_id']
+        data = {
+            'action': 'WOULD_EXECUTE',
+            'instance_id': instance_id,
+            'message': f"DRY RUN: EC2 instance {instance_id} would be rebooted; reboot action would be executed. No actual changes made.",
+            'dry_run': True
+        }
+
+        if self.ec2_client:
+            try:
+                response = self.ec2_client.describe_instances(InstanceIds=[instance_id])
+                instances = response.get('Reservations', [{}])[0].get('Instances', [])
+                if instances:
+                    instance = instances[0]
+                    data['target_instance'] = {
+                        'instance_id': instance.get('InstanceId', instance_id),
+                        'current_state': instance.get('State', {}).get('Name', 'unknown'),
+                        'instance_type': instance.get('InstanceType', 'unknown'),
+                        'availability_zone': instance.get('Placement', {}).get('AvailabilityZone', 'unknown')
+                    }
+            except Exception as e:
+                logger.warning(f"Dry-run instance lookup failed for {instance_id}: {e}")
         
         return ToolResult(
             tool_name=tool_call.tool_name,
             success=True,
-            data={
-                'action': 'WOULD_EXECUTE',
-                'instance_id': instance_id,
-                'message': f"DRY RUN: EC2 instance {instance_id} would be rebooted. No actual changes made.",
-                'dry_run': True
-            },
+            data=data,
             execution_mode=self.execution_mode,
             correlation_id=correlation_id
         )
@@ -248,7 +268,7 @@ class EC2RebootTool:
             result_data = {
                 'action': 'EXECUTED',
                 'instance_id': instance_id,
-                'message': f'Instance {instance_id} reboot initiated successfully',
+                'message': f'Reboot action would be executed for EC2 instance {instance_id}. Sandbox live request prepared successfully.',
                 'execution_confirmation': f'Reboot command sent to {instance_id}',
                 'status': 'reboot_initiated',
                 'previous_state': current_state,
@@ -328,7 +348,23 @@ class EC2RebootTool:
         Returns:
             ToolResult with current instance status
         """
-        # Always execute in sandbox mode
+        if self.execution_mode == ExecutionMode.LOCAL_MOCK:
+            return ToolResult(
+                tool_name="get_reboot_status",
+                success=True,
+                data={
+                    'instance_id': instance_id,
+                    'current_state': 'running',
+                    'state_reason': 'Mock status report',
+                    'instance_status': 'ok',
+                    'system_status': 'ok',
+                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'mock': True
+                },
+                execution_mode=self.execution_mode,
+                correlation_id=correlation_id
+            )
+
         try:
             if not self.ec2_client:
                 raise RemediationToolError("EC2 client not available for status check")
