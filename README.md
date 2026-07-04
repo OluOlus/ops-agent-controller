@@ -2,56 +2,160 @@
 
 A serverless Tier-1 Ops assistant that lets platform engineers diagnose AWS incidents and perform controlled remediation via chat (Amazon Q Business, Microsoft Teams, or a plain web interface). Every action is gated by user authentication, resource tagging, an explicit approval workflow, and a complete audit trail.
 
+---
+
+## Problem this solves
+
+When a production EC2 instance is unresponsive at 3am, platform engineers currently have to:
+
+1. SSH into a bastion or open the AWS console
+2. Navigate multiple services (EC2, CloudWatch, CloudTrail) to understand what happened
+3. Execute remediation commands manually with no audit trail
+4. Notify stakeholders through a separate channel
+
+This creates friction, increases MTTR, and leaves no consistent record of who did what and why.
+
+OpsAgent Controller puts all of that into a single chat interface — with guardrails. Engineers ask questions in natural language, the LLM selects the right AWS tool, and destructive operations require explicit approval before execution. Everything is logged.
+
+---
+
+## How it works
+
+1. A user sends a message via Teams, Amazon Q Business, or a direct API call
+2. The request is authenticated (API key + user allow-list in SSM Parameter Store)
+3. An LLM (Amazon Bedrock) parses the intent and selects one or more tools
+4. Tool guardrails validate inputs against JSON schemas and check resource tags
+5. **Read operations** execute immediately and return results
+6. **Write operations** require an approval token (15-min TTL, single-use) before execution
+7. Every action — successful or denied — is written to CloudWatch Logs and DynamoDB with a correlation ID
+
+---
+
+## Architecture
+
+```
+Chat interface (Amazon Q Business / Teams / Web / curl)
+        │
+        ▼
+Amazon API Gateway (REST, regional, API key auth)
+        │
+        ▼
+AWS Lambda (Python 3.13, arm64, 1 GB, 60s timeout)
+  ├── Authentication (SSM allow-list)
+  ├── LLM intent parsing (AWS Bedrock — Nova Pro or Claude)
+  ├── Tool guardrails (JSON schema + tag validation)
+  ├── Approval gate (DynamoDB-backed token lifecycle)
+  └── Tool execution engine
+        │
+        ├── Read: EC2, CloudWatch, ALB, CloudTrail
+        ├── Write: EC2 reboot, ECS scaling (tag-gated + approval)
+        └── Workflow: incident records (DynamoDB), notifications (SNS)
+
+Supporting services:
+  • DynamoDB — audit log, incidents, approval tokens
+  • CloudWatch Logs — 90-day structured audit stream
+  • SNS — approval/incident/alarm notifications
+  • SQS — dead-letter queue
+  • KMS — encryption at rest
+```
+
+Infrastructure as code: **Terraform** (`infrastructure-terraform/`) or AWS SAM (`infrastructure/template.yaml`).
+
+---
+
+## Usage
+
+### Deploy
+
+```bash
+cd infrastructure-terraform
+bash build.sh                              # Package Lambda zip
+terraform init && terraform apply -var="execution_mode=SANDBOX_LIVE"
+```
+
+### Post-deploy setup
+
+```bash
+# Set API key
+aws ssm put-parameter --name /opsagent/api-key --value "$(openssl rand -base64 32)" --type SecureString --overwrite --region eu-west-2
+
+# Set user allow-list
+aws ssm put-parameter --name /opsagent/user-allow-list --value '["you@company.com"]' --type String --overwrite --region eu-west-2
+```
+
+### Talk to it
+
+```bash
+curl -s -X POST "https://YOUR_API_ID.execute-api.eu-west-2.amazonaws.com/sandbox/chat" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"messageText":"get CPU metrics for i-0abc123 over the last hour","userId":"you@company.com","channel":"web"}' | jq .data.channel_data.message
+```
+
+---
+
+## Example workflow
+
+```
+Engineer:  "The checkout service is slow. Check CPU on i-0abc123def456."
+
+OpsAgent:  Calling get_cloudwatch_metrics...
+           EC2 CPUUtilization for i-0abc123def456:
+           Current: 94.2% (HIGH), Peak: 98.7% over last 1h.
+           Recommendation: Consider scaling or rebooting.
+
+Engineer:  "Reboot it."
+
+OpsAgent:  ⚠️ Write operation requires approval.
+           Action: reboot_ec2_instance (i-0abc123def456)
+           Reason: User-requested reboot due to high CPU
+           Token: a3f8c9... (expires in 15 minutes)
+
+Engineer:  "Approve token a3f8c9..."
+
+OpsAgent:  ✅ Instance i-0abc123def456 rebooted successfully.
+           Correlation ID: corr-7b2e4f91
+           Audit logged to DynamoDB and CloudWatch.
+```
+
+---
+
+## Author / Maintainer
+
+**Olu Oluwafemi**
+GitHub: [@OluOlus](https://github.com/OluOlus)
+
+---
+
+## Licence
+
+MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+## Full documentation
+
 > **New here?** See [QUICK_START.md](QUICK_START.md) for the fastest path to a running deployment.
 
----
-
-## Table of Contents
-
-1. [Architecture overview](#architecture-overview)
-2. [Key capabilities](#key-capabilities)
-3. [Security model](#security-model)
-4. [Prerequisites](#prerequisites)
-5. [Development setup](#development-setup)
-6. [Deployment](#deployment)
-7. [Post-deployment configuration](#post-deployment-configuration)
-8. [Amazon Q Business integration](#amazon-q-business-integration)
-9. [Teams integration](#teams-integration)
-10. [API reference](#api-reference)
-11. [Environment variables](#environment-variables)
-12. [Execution modes](#execution-modes)
-13. [Monitoring and alerting](#monitoring-and-alerting)
-14. [Troubleshooting](#troubleshooting)
-15. [Contributing](#contributing)
-16. [License](#license)
+Detailed reference documentation follows below for deployment options, security model, API reference, monitoring, and troubleshooting.
 
 ---
 
-## Architecture overview
+## Table of Contents (detailed)
 
-```
-Chat interface (Amazon Q Business / Teams / Slack / Web)
-        │
-        ▼
-Amazon API Gateway  ──► AWS WAF (recommended for production)
-        │
-        ▼
-AWS Lambda (Python 3.13, 1 GB memory, 60 s timeout)
-  │  ├── Authentication & allow-list check (SSM Parameter Store)
-  │  ├── LLM intent parsing (AWS Bedrock / Amazon Q Business)
-  │  ├── Tool guardrails (schema validation, tag checks)
-  │  ├── Approval gate (DynamoDB — staging & production)
-  │  └── Tool execution (read-only or approved write ops)
-  │
-  ├── AWS services operated on (EC2, ECS, CloudWatch, CloudTrail, ALB)
-  ├── DynamoDB — audit log, incidents, approval tokens
-  ├── CloudWatch Logs — structured audit stream (90-day retention)
-  ├── SNS — approval requests, incident notifications, alarm emails
-  ├── SQS — dead-letter queue for failed Lambda invocations
-  └── KMS — encryption at rest for DynamoDB tables and log groups
-```
-
-Infrastructure is defined as Terraform in `infrastructure-terraform/` (recommended) and alternatively as AWS SAM (CloudFormation) in `infrastructure/template.yaml`.
+1. [Key capabilities](#key-capabilities)
+2. [Security model](#security-model)
+3. [Prerequisites](#prerequisites)
+4. [Development setup](#development-setup)
+5. [Deployment](#deployment)
+6. [Post-deployment configuration](#post-deployment-configuration)
+7. [Amazon Q Business integration](#amazon-q-business-integration)
+8. [Teams integration](#teams-integration)
+9. [API reference](#api-reference)
+10. [Environment variables](#environment-variables)
+11. [Execution modes](#execution-modes)
+12. [Monitoring and alerting](#monitoring-and-alerting)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -772,18 +876,6 @@ ops-agent-controller/
 4. Format: `black src/ tests/`
 5. Run full suite: `pytest`
 6. Submit a pull request with a clear description of what changed and why.
-
-**Coding standards:**
-- PEP 8; enforced by Black
-- Type hints on all public functions
-- No wildcard imports
-- Unit tests required for new functionality; integration tests for AWS operations
-
----
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
