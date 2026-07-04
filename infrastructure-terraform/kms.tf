@@ -51,7 +51,7 @@ resource "aws_kms_key" "opsagent" {
   policy                  = data.aws_iam_policy_document.opsagent_kms.json
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 
