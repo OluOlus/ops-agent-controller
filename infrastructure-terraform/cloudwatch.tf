@@ -4,7 +4,7 @@ resource "aws_cloudwatch_log_group" "audit" {
   kms_key_id        = aws_kms_key.opsagent.arn
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 
