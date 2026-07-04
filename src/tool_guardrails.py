@@ -286,31 +286,8 @@ class ToolGuardrails:
             }
         )
 
-        # EC2 reboot alias (matches architecture spec naming convention)
-        policies["reboot_ec2"] = ToolPolicy(
-            tool_name="reboot_ec2",
-            allowed=True,
-            requires_approval=True,
-            allowed_execution_modes={ExecutionMode.LOCAL_MOCK, ExecutionMode.DRY_RUN, ExecutionMode.SANDBOX_LIVE},
-            requires_resource_tags=True,
-            required_tags={"OpsAgentManaged": "true"},
-            schema={
-                "type": "object",
-                "properties": {
-                    "instance_id": {
-                        "type": "string",
-                        "pattern": "^i-[0-9a-f]{8,17}$"
-                    },
-                    "reason": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 500
-                    }
-                },
-                "required": ["instance_id"],
-                "additionalProperties": False
-            }
-        )
+        # EC2 reboot alias (matches architecture spec naming convention) — delegates to canonical policy
+        policies["reboot_ec2"] = policies["reboot_ec2_instance"]
 
         # ECS service scaling tool (write operation, requires approval and tags)
         policies["scale_ecs_service"] = ToolPolicy(

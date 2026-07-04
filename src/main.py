@@ -301,7 +301,7 @@ def format_response_for_channel(message: str, channel: ChannelType, additional_d
 
 def _cors_origin() -> str:
     """Return the configured CORS allowed origin; defaults to deny-all if unset."""
-    return os.environ.get("CORS_ALLOWED_ORIGIN", "*")
+    return os.environ.get("CORS_ALLOWED_ORIGIN", "null")
 
 
 def create_error_response(status_code: int, error_message: str, correlation_id: Optional[str] = None) -> Dict[str, Any]:

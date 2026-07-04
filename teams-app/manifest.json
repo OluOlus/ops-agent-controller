@@ -1,0 +1,48 @@
+{
+  "manifestVersion": "1.17",
+  "version": "1.0.0",
+  "id": "9d8c5d6a-fe2f-4ce2-8955-07e14b9fa7fd",
+  "developer": {
+    "name": "Platform Engineering",
+    "websiteUrl": "https://github.com",
+    "privacyUrl": "https://github.com",
+    "termsOfUseUrl": "https://github.com"
+  },
+  "name": {
+    "short": "OpsAgent AWS",
+    "full": "OpsAgent AWS Operations Assistant"
+  },
+  "description": {
+    "short": "AWS incident diagnosis and remediation",
+    "full": "Conversational Tier-1 Ops assistant for AWS. Diagnose EC2 issues, check CloudWatch metrics, reboot instances with approval, and manage incidents from Teams."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#FF9900",
+  "bots": [
+    {
+      "botId": "9d8c5d6a-fe2f-4ce2-8955-07e14b9fa7fd",
+      "scopes": ["personal", "team", "groupChat"],
+      "commandLists": [
+        {
+          "scopes": ["personal"],
+          "commands": [
+            { "title": "health", "description": "Check system status" },
+            { "title": "help", "description": "Show available commands" },
+            { "title": "describe instance", "description": "Get EC2 instance details" },
+            { "title": "cpu metrics", "description": "View CPU metrics for an instance" },
+            { "title": "reboot instance", "description": "Reboot an EC2 instance (requires approval)" }
+          ]
+        }
+      ],
+      "supportsFiles": false,
+      "isNotificationOnly": false
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": [
+    "cj50a580x5.execute-api.eu-west-2.amazonaws.com"
+  ]
+}

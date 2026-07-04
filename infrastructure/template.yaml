@@ -32,7 +32,7 @@ Parameters:
   
   BedrockModelId:
     Type: String
-    Default: anthropic.claude-3-5-sonnet-20241022-v2:0
+    Default: anthropic.claude-3-7-sonnet-20250219-v1:0
     Description: Bedrock model ID for LLM provider
   
   ApiKeyParameterName:
@@ -102,7 +102,6 @@ Parameters:
     Description: Email address for CloudWatch alarm notifications (optional)
 
 Conditions:
-  EnableEncryption: !Equals [!Ref EnableDynamoDBEncryption, 'true']
   CreateTestResources: !And
     - !Equals [!Ref CreateTestResources, 'true']
     - !Not [!Equals [!Ref SubnetId, '']]
@@ -115,7 +114,7 @@ Globals:
   Function:
     Timeout: 60
     MemorySize: 1024
-    Runtime: python3.11
+    Runtime: python3.13
     Tracing: Active
     Environment:
       Variables:
@@ -157,7 +156,7 @@ Resources:
           - Sid: Allow Lambda Function
             Effect: Allow
             Principal:
-              AWS: !GetAtt OpsAgentExecutionRole.Arn
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:role/opsagent-execution-role-${Environment}'
             Action:
               - kms:Encrypt
               - kms:Decrypt
@@ -186,9 +185,8 @@ Resources:
     Type: AWS::Serverless::Api
     Properties:
       StageName: !Ref Environment
-      DefinitionUri: openapi-schema.yaml
-      Variables:
-        LambdaFunctionName: !Ref OpsAgentFunction
+      Auth:
+        ApiKeyRequired: true
       EndpointConfiguration:
         Type: REGIONAL
       TracingEnabled: true
@@ -344,6 +342,7 @@ Resources:
   OpsAgentExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub 'opsagent-execution-role-${Environment}'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -530,27 +529,21 @@ Resources:
               - bedrock:InvokeModel
               - bedrock:InvokeModelWithResponseStream
             Resource:
-              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0'
-              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0'
-              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0'
-              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0'
+              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.*'
           
           # Amazon Q Business permissions for hybrid LLM integration
-          - Effect: Allow
-            Action:
-              - qbusiness:ChatSync
-              - qbusiness:Chat
-              - qbusiness:GetApplication
-              - qbusiness:ListConversations
-            Resource: 
-              - !If
-                - HasAmazonQIntegration
+          - !If
+            - HasAmazonQIntegration
+            - Effect: Allow
+              Action:
+                - qbusiness:ChatSync
+                - qbusiness:Chat
+                - qbusiness:GetApplication
+                - qbusiness:ListConversations
+              Resource:
                 - !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${AmazonQAppId}'
-                - !Ref AWS::NoValue
-              - !If
-                - HasAmazonQIntegration
                 - !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${AmazonQAppId}/*'
-                - !Ref AWS::NoValue
+            - !Ref AWS::NoValue
           
           # SSM Parameter Store permissions for API keys and configuration
           - Effect: Allow
@@ -830,9 +823,9 @@ Resources:
         AttributeName: ttl
         Enabled: true
       SSESpecification:
-        SSEEnabled: !If [EnableEncryption, true, false]
-        SSEType: !If [EnableEncryption, KMS, !Ref 'AWS::NoValue']
-        KMSMasterKeyId: !If [EnableEncryption, !Ref OpsAgentKMSKey, !Ref 'AWS::NoValue']
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref OpsAgentKMSKey
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       Tags:
@@ -891,9 +884,9 @@ Resources:
         AttributeName: ttl
         Enabled: true
       SSESpecification:
-        SSEEnabled: !If [EnableEncryption, true, false]
-        SSEType: !If [EnableEncryption, KMS, !Ref 'AWS::NoValue']
-        KMSMasterKeyId: !If [EnableEncryption, !Ref OpsAgentKMSKey, !Ref 'AWS::NoValue']
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref OpsAgentKMSKey
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       Tags:
@@ -926,9 +919,9 @@ Resources:
         AttributeName: ttl
         Enabled: true
       SSESpecification:
-        SSEEnabled: !If [EnableEncryption, true, false]
-        SSEType: !If [EnableEncryption, KMS, !Ref 'AWS::NoValue']
-        KMSMasterKeyId: !If [EnableEncryption, !Ref OpsAgentKMSKey, !Ref 'AWS::NoValue']
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref OpsAgentKMSKey
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       Tags:

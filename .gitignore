@@ -146,4 +146,12 @@ samconfig.toml.bak
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db
+Thumbs.dblambda.zip
+infrastructure/packaged.yaml
+infrastructure-terraform/.build/
+infrastructure-terraform/lambda.zip
+infrastructure-terraform/.terraform/
+infrastructure-terraform/terraform.tfstate
+infrastructure-terraform/terraform.tfstate.backup
+infrastructure-terraform/tfplan.*
+infrastructure-terraform/.terraform.lock.hcl

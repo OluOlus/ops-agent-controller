@@ -1,6 +1,8 @@
 # OpsAgent Controller
 
-A serverless Tier-1 Ops assistant that lets platform engineers diagnose AWS incidents and perform controlled remediation via chat (Amazon Q Business, Microsoft Teams, Slack, or a plain web interface). Every action is gated by user authentication, resource tagging, an explicit approval workflow, and a complete audit trail.
+A serverless Tier-1 Ops assistant that lets platform engineers diagnose AWS incidents and perform controlled remediation via chat (Amazon Q Business, Microsoft Teams, or a plain web interface). Every action is gated by user authentication, resource tagging, an explicit approval workflow, and a complete audit trail.
+
+> **New here?** See [QUICK_START.md](QUICK_START.md) for the fastest path to a running deployment.
 
 ---
 
@@ -144,6 +146,10 @@ aws ec2 create-tags --resources i-0abc123 --tags \
 
 CloudFormation, Lambda, API Gateway, DynamoDB, IAM (create roles/policies), CloudWatch, SSM Parameter Store, SNS, SQS, KMS, S3 (SAM deployment bucket).
 
+**Bedrock model access:**
+
+Before deploying, enable access to the Bedrock models you intend to use. In the AWS console: **Amazon Bedrock → Model access → Manage model access** → enable `Claude 3.5 Sonnet` (and optionally `Claude 3.5 Haiku`). Access requests are usually approved within a few minutes. Bedrock is region-specific — ensure you request access in the same region you deploy to.
+
 ---
 
 ## Development setup
@@ -158,9 +164,12 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements-dev.txt
+```
 
-# Copy and fill in environment config
-cp .env.example .env   # edit .env with your values
+Create a local environment file for `sam local`:
+
+```bash
+cp infrastructure/config/test.yaml local-env.json   # edit with your values
 ```
 
 ### Run tests
@@ -201,7 +210,11 @@ curl http://localhost:3000/health
 
 ```bash
 ./infrastructure/deploy.sh --environment sandbox
+# or from the project root:
+./deploy-now.sh
 ```
+
+`infrastructure/samconfig.toml` holds default parameter values so you can re-run `sam deploy` without specifying all flags every time. Edit it before your first deploy to set your region, stack name, and S3 bucket.
 
 ### Production deploy (SAM)
 
@@ -306,7 +319,10 @@ echo "API Key:  $PLUGIN_API_KEY"
 # Health check
 curl -s "$API_ENDPOINT/health" | jq .
 
-# Diagnostic operation
+# Run the built-in validation script
+./infrastructure/validate-deployment.sh --environment production
+
+# Manual diagnostic operation test
 curl -s -X POST "$API_ENDPOINT/operations/diagnostic" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $PLUGIN_API_KEY" \
@@ -370,6 +386,8 @@ See [docs/teams-integration.md](docs/teams-integration.md) and [docs/TEAMS_APP_S
 2. Store the secret: `aws ssm put-parameter --name /opsagent/teams-bot-app-secret --value <secret> --type SecureString`
 3. Set `TEAMS_BOT_APP_ID` in your Lambda environment variables.
 4. Configure the bot messaging endpoint to `$API_ENDPOINT/chat`.
+
+> **Slack:** Slack can post to the `/chat` endpoint using an outgoing webhook, but there is no built-in Slack signature verification or channel adapter yet. A custom Slack adapter would need to be added to `src/channel_adapters.py`.
 
 ---
 
@@ -478,13 +496,20 @@ Full API schema: [`infrastructure/openapi-schema.yaml`](infrastructure/openapi-s
 Change mode without redeployment:
 
 ```bash
+# WARNING: --environment Variables replaces ALL env vars.
+# Fetch the current values first to avoid wiping other config.
+CURRENT=$(aws lambda get-function-configuration \
+  --function-name opsagent-controller-production \
+  --query 'Environment.Variables' --output json)
+
+# Then merge in the change using jq before applying
+echo "$CURRENT" | jq '. + {"EXECUTION_MODE": "DRY_RUN"}' > /tmp/new-env.json
 aws lambda update-function-configuration \
   --function-name opsagent-controller-production \
-  --environment Variables='{
-    "EXECUTION_MODE": "DRY_RUN",
-    "ENVIRONMENT": "production"
-  }'
+  --environment "Variables=$(cat /tmp/new-env.json)"
 ```
+
+For production environments, prefer re-deploying with updated `samconfig.toml` parameters over manual env var patches — it keeps the deployed state reproducible.
 
 ---
 
@@ -625,42 +650,75 @@ See also: [docs/troubleshooting.md](docs/troubleshooting.md)
 ops-agent-controller/
 ├── src/                              # Lambda source code
 │   ├── main.py                       # Lambda handler & request routing
-│   ├── models.py                     # Pydantic-style data models
+│   ├── models.py                     # Data models (ExecutionMode, ApprovalRequest, etc.)
 │   ├── authentication.py             # User auth and allow-list validation
 │   ├── approval_gate.py              # Approval token management (memory & DynamoDB)
 │   ├── audit_logger.py               # CloudWatch + DynamoDB audit logging
 │   ├── tool_execution_engine.py      # Orchestrates tool calls
 │   ├── tool_guardrails.py            # Schema validation, tag checks, policy engine
-│   ├── llm_provider.py               # Bedrock / Amazon Q Business / OpenAI clients
-│   ├── channel_adapters.py           # Teams / Slack / Web response formatting
+│   ├── llm_provider.py               # Bedrock / OpenAI client wrappers
+│   ├── amazon_q_provider.py          # Amazon Q Business client
+│   ├── channel_adapters.py           # Teams / Web response formatting
 │   ├── aws_diagnosis_tools.py        # Read-only AWS operations (EC2, CW, ALB, CT)
 │   ├── aws_remediation_tools.py      # Write AWS operations (reboot, scale)
+│   ├── aws_monitoring_tools.py       # CloudWatch metrics & alarm helpers
+│   ├── aws_monitoring_assistant.py   # Higher-level monitoring workflows
 │   ├── workflow_tools.py             # Incident records, channel notifications
 │   └── requirements.txt             # Lambda package dependencies
-├── tests/                            # Test suite
+├── tests/                            # Test suite (~560 tests)
 │   ├── test_main.py                  # Lambda handler tests
+│   ├── test_models.py                # Data model unit tests
 │   ├── test_approval_gate.py         # Approval workflow unit tests
 │   ├── test_audit_logger.py          # Audit logging unit tests
 │   ├── test_authentication.py        # Auth unit tests
 │   ├── test_tool_guardrails.py       # Guardrail policy unit tests
+│   ├── test_tool_execution_engine.py # Tool orchestration tests
+│   ├── test_llm_provider.py          # LLM client tests
+│   ├── test_channel_adapters.py      # Channel adapter tests
+│   ├── test_aws_diagnosis_tools.py   # Diagnosis tool tests
+│   ├── test_aws_remediation_tools.py # Remediation tool tests
+│   ├── test_amazon_q_integration.py  # Amazon Q Business integration tests
+│   ├── test_plugin_integration.py    # Plugin endpoint integration tests
+│   ├── test_plugin_operations.py     # Plugin operation tests
+│   ├── test_web_channel_integration.py # Web channel integration tests
+│   ├── test_infrastructure_provisioning.py # SAM template validation tests
+│   ├── test_readiness_validation.py  # Production readiness checks
 │   ├── test_properties.py            # Hypothesis property-based tests
 │   ├── test_integration.py           # End-to-end integration tests
 │   └── test_smoke_tests.py           # Production readiness smoke tests
 ├── infrastructure/
 │   ├── template.yaml                 # AWS SAM / CloudFormation template
+│   ├── samconfig.toml                # SAM deploy defaults (region, stack name, S3 bucket)
 │   ├── openapi-schema.yaml           # API Gateway OpenAPI spec
+│   ├── openapi-q-compatible.yaml     # Amazon Q Business compatible OpenAPI spec
 │   ├── amazon-q-plugin-schema.yaml   # Amazon Q Business plugin definition
+│   ├── config/
+│   │   ├── production.yaml           # Production parameter values
+│   │   ├── sandbox.yaml              # Sandbox parameter values
+│   │   └── test.yaml                 # Local/test environment config
 │   ├── deploy.sh                     # Deployment automation
-│   └── configure.sh                  # Post-deploy configuration helper
+│   ├── deploy-environment.sh         # Per-environment deploy wrapper
+│   ├── configure.sh                  # Post-deploy configuration helper
+│   ├── validate-deployment.sh        # Post-deploy validation checks
+│   ├── validate.sh                   # Pre-deploy template validation
+│   └── cleanup.sh                    # Stack teardown
 ├── docs/
 │   ├── deployment-guide.md           # Step-by-step deployment guide
 │   ├── amazon-q-business-integration-guide.md
+│   ├── amazon-q-integration.md
 │   ├── teams-integration.md
 │   ├── TEAMS_APP_SETUP.md
+│   ├── TEAMS_AWS_ARCHITECTURE.md
 │   ├── troubleshooting.md
-│   └── credential-setup.md
-├── .env                              # Local environment config (gitignored)
-├── requirements.txt                  # Development / CI dependencies
+│   ├── credential-setup.md
+│   └── PRODUCTION_IMPLEMENTATION_GUIDE.md
+├── deploy-full-infrastructure.sh     # One-shot full deploy (all environments)
+├── deploy-now.sh                     # Fast sandbox deploy shortcut
+├── deploy-amazon-q-integration.sh    # Amazon Q Business specific deploy
+├── setup-teams-bot.sh                # Teams bot setup helper
+├── QUICK_START.md                    # Fastest path to a running deployment
+├── CONFIGURATION.md                  # Configuration reference
+├── requirements.txt                  # Runtime dependencies
 ├── requirements-dev.txt              # Test and linting dependencies
 ├── pytest.ini                        # Pytest configuration
 └── pyproject.toml                    # Project metadata
@@ -693,9 +751,14 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## Additional resources
 
-- [Deployment guide](docs/deployment-guide.md) — environment-by-environment walkthrough
-- [Amazon Q Business integration guide](docs/amazon-q-business-integration-guide.md)
-- [Teams integration guide](docs/teams-integration.md)
-- [Troubleshooting guide](docs/troubleshooting.md)
-- [Credential setup](docs/credential-setup.md)
-- [API schema](infrastructure/openapi-schema.yaml)
+- [QUICK_START.md](QUICK_START.md) — fastest path to a running deployment
+- [CONFIGURATION.md](CONFIGURATION.md) — full configuration reference
+- [docs/deployment-guide.md](docs/deployment-guide.md) — environment-by-environment walkthrough
+- [docs/PRODUCTION_IMPLEMENTATION_GUIDE.md](docs/PRODUCTION_IMPLEMENTATION_GUIDE.md) — production hardening checklist
+- [docs/amazon-q-business-integration-guide.md](docs/amazon-q-business-integration-guide.md) — Amazon Q Business setup
+- [docs/teams-integration.md](docs/teams-integration.md) — Teams bot setup
+- [docs/TEAMS_APP_SETUP.md](docs/TEAMS_APP_SETUP.md) — Azure Bot registration walkthrough
+- [docs/credential-setup.md](docs/credential-setup.md) — SSM and Secrets Manager credential layout
+- [docs/troubleshooting.md](docs/troubleshooting.md) — common errors and fixes
+- [infrastructure/openapi-schema.yaml](infrastructure/openapi-schema.yaml) — full API schema
+- [docs/plugin-sample-requests-responses.md](docs/plugin-sample-requests-responses.md) — example API payloads

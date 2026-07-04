@@ -374,7 +374,7 @@ class AuditLogger:
     def _write_to_dynamodb(self, event: AuditEvent) -> None:
         """Write audit event to DynamoDB"""
         item = {
-            'correlation_id': {'S': event.correlation_id},
+            'correlationId': {'S': event.correlation_id},
             'timestamp': {'S': event.timestamp.isoformat() + 'Z'},
             'event_type': {'S': event.event_type.value},
             'user_id': {'S': event.user_id},

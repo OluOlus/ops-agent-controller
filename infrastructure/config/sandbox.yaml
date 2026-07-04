@@ -24,7 +24,7 @@ api_gateway:
 lambda:
   memory_size: 512
   timeout: 30
-  runtime: python3.11
+  runtime: python3.13
   environment_variables:
     EXECUTION_MODE: SANDBOX_LIVE
     ENVIRONMENT: sandbox

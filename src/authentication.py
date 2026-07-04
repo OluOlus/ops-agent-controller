@@ -328,14 +328,14 @@ class UserAuthenticator:
             allow_list = self._get_user_allow_list()
             
             if allow_list is None:
-                # If allow-list is not configured, check execution mode
+                # If allow-list is not configured, only bypass in LOCAL_MOCK mode for testing
                 execution_mode = os.environ.get("EXECUTION_MODE", "SANDBOX_LIVE")
-                if execution_mode == "SANDBOX_LIVE":
-                    # In sandbox mode, allow all users if no allow-list is configured
-                    logger.warning(f"No user allow-list configured, allowing user in sandbox mode: {user_id}")
+                if execution_mode == "LOCAL_MOCK":
+                    # In local mock mode, allow all users if no allow-list is configured
+                    logger.warning(f"No user allow-list configured, allowing user in LOCAL_MOCK mode: {user_id}")
                     return True, None
                 else:
-                    return False, "User allow-list not configured and not in sandbox mode"
+                    return False, "User allow-list not configured"
             
             # Normalize user ID for comparison
             normalized_user_id = user_id.lower().strip()
@@ -574,9 +574,9 @@ class RequestSignatureValidator:
             plugin_secret = self._get_plugin_secret()
             
             if not plugin_secret:
-                # In sandbox mode, allow requests without signature validation
-                if execution_mode == "SANDBOX_LIVE":
-                    logger.warning("Plugin secret not configured, allowing request in sandbox mode")
+                # Only bypass signature validation in LOCAL_MOCK mode for testing
+                if execution_mode == "LOCAL_MOCK":
+                    logger.warning("Plugin secret not configured, allowing request in LOCAL_MOCK mode")
                     return True, None
                 else:
                     return False, "Plugin secret not configured"
@@ -634,8 +634,8 @@ class RequestSignatureValidator:
                     return self._validate_teams_bearer_token(request_data, correlation_id)
                 
                 # In sandbox mode, allow requests without API key
-                if execution_mode == "SANDBOX_LIVE":
-                    logger.warning("No API key provided, allowing request in sandbox mode")
+                if execution_mode == "LOCAL_MOCK":
+                    logger.warning("No API key provided, allowing request in LOCAL_MOCK mode")
                     return True, None
                 else:
                     return False, "API key required"

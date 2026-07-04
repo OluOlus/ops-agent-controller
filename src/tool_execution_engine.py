@@ -65,30 +65,20 @@ class ToolExecutionEngine:
         if execution_mode_value != ExecutionMode.LOCAL_MOCK.value:
             self._initialize_aws_clients()
         
-        # Initialize AWS diagnosis tools without eager client setup
-        self.cloudwatch_tool = CloudWatchMetricsTool(ExecutionMode.LOCAL_MOCK)
-        self.ec2_tool = EC2DescribeTool(ExecutionMode.LOCAL_MOCK)
-        self.ec2_status_tool = EC2StatusTool(ExecutionMode.LOCAL_MOCK)  # New dedicated tool for get_ec2_status
-        self.alb_tool = ALBTargetHealthTool(ExecutionMode.SANDBOX_LIVE)
-        self.cloudtrail_tool = CloudTrailSearchTool(ExecutionMode.LOCAL_MOCK)
+        # Initialize AWS diagnosis tools with the actual execution mode
+        self.cloudwatch_tool = CloudWatchMetricsTool(execution_mode)
+        self.ec2_tool = EC2DescribeTool(execution_mode)
+        self.ec2_status_tool = EC2StatusTool(execution_mode)
+        self.alb_tool = ALBTargetHealthTool(execution_mode)
+        self.cloudtrail_tool = CloudTrailSearchTool(execution_mode)
         
-        # Initialize AWS remediation tools without eager client setup
-        self.ec2_reboot_tool = EC2RebootTool(ExecutionMode.LOCAL_MOCK)
-        self.ecs_scaling_tool = ECSScalingTool(ExecutionMode.LOCAL_MOCK)
+        # Initialize AWS remediation tools with the actual execution mode
+        self.ec2_reboot_tool = EC2RebootTool(execution_mode)
+        self.ecs_scaling_tool = ECSScalingTool(execution_mode)
         
-        # Initialize workflow tools
-        self.incident_tool = IncidentRecordTool(ExecutionMode.LOCAL_MOCK)
-        self.channel_tool = ChannelNotificationTool(ExecutionMode.LOCAL_MOCK)
-
-        self.cloudwatch_tool.execution_mode = execution_mode
-        self.ec2_tool.execution_mode = execution_mode
-        self.ec2_status_tool.execution_mode = execution_mode  # Update execution mode for EC2 status tool
-        self.alb_tool.execution_mode = execution_mode
-        self.cloudtrail_tool.execution_mode = execution_mode
-        self.ec2_reboot_tool.execution_mode = execution_mode
-        self.ecs_scaling_tool.execution_mode = execution_mode
-        self.incident_tool.execution_mode = execution_mode
-        self.channel_tool.execution_mode = execution_mode
+        # Initialize workflow tools with the actual execution mode
+        self.incident_tool = IncidentRecordTool(execution_mode)
+        self.channel_tool = ChannelNotificationTool(execution_mode)
 
         self._sync_tool_clients()
         

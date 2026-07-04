@@ -21,9 +21,14 @@ image_repositories = []
 [sandbox]
 [sandbox.deploy.parameters]
 stack_name = "opsagent-controller-sandbox"
+region = "eu-west-2"
+resolve_s3 = true
+s3_prefix = "opsagent-controller"
+capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
 parameter_overrides = [
     "Environment=sandbox",
-    "ExecutionMode=DRY_RUN"
+    "ExecutionMode=SANDBOX_LIVE",
+    "CreateTestResources=false"
 ]
 
 [staging]
