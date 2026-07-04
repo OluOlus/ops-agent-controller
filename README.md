@@ -36,7 +36,7 @@ Chat interface (Amazon Q Business / Teams / Slack / Web)
 Amazon API Gateway  ──► AWS WAF (recommended for production)
         │
         ▼
-AWS Lambda (Python 3.11, 1 GB memory, 60 s timeout)
+AWS Lambda (Python 3.13, 1 GB memory, 60 s timeout)
   │  ├── Authentication & allow-list check (SSM Parameter Store)
   │  ├── LLM intent parsing (AWS Bedrock / Amazon Q Business)
   │  ├── Tool guardrails (schema validation, tag checks)
@@ -51,7 +51,7 @@ AWS Lambda (Python 3.11, 1 GB memory, 60 s timeout)
   └── KMS — encryption at rest for DynamoDB tables and log groups
 ```
 
-Infrastructure is defined as AWS SAM (CloudFormation) in `infrastructure/template.yaml`.
+Infrastructure is defined as Terraform in `infrastructure-terraform/` (recommended) and alternatively as AWS SAM (CloudFormation) in `infrastructure/template.yaml`.
 
 ---
 
@@ -136,19 +136,30 @@ aws ec2 create-tags --resources i-0abc123 --tags \
 
 | Tool | Version | Install |
 |---|---|---|
-| Python | 3.11+ | [python.org](https://python.org) |
+| Python | 3.9+ (local); Lambda runs 3.13 | [python.org](https://python.org) |
 | AWS CLI | v2.x | `brew install awscli` |
-| AWS SAM CLI | v1.x | `pip install aws-sam-cli` |
-| Docker | any | Required for `sam build --use-container` |
+| Terraform | >= 1.5 | `brew install terraform` |
+| pip3 | any | Bundled with Python |
 | jq | any | `brew install jq` |
+| Azure CLI | 2.x (for Teams integration only) | `brew install azure-cli` |
 
 **AWS permissions required for deployment:**
 
-CloudFormation, Lambda, API Gateway, DynamoDB, IAM (create roles/policies), CloudWatch, SSM Parameter Store, SNS, SQS, KMS, S3 (SAM deployment bucket).
+Lambda, API Gateway, DynamoDB, IAM (create roles/policies), CloudWatch, SSM Parameter Store, SNS, SQS, KMS, S3, Bedrock.
 
 **Bedrock model access:**
 
-Before deploying, enable access to the Bedrock models you intend to use. In the AWS console: **Amazon Bedrock → Model access → Manage model access** → enable `Claude 3.5 Sonnet` (and optionally `Claude 3.5 Haiku`). Access requests are usually approved within a few minutes. Bedrock is region-specific — ensure you request access in the same region you deploy to.
+The LLM backend defaults to **Amazon Nova Pro** (`amazon.nova-pro-v1:0`), which works immediately with no approval required.
+
+To use **Anthropic Claude** models instead:
+
+1. Go to the Bedrock console → **Model catalog** → find **Claude 3.7 Sonnet**
+2. Complete the Anthropic use case form (one-time per account)
+3. The Lambda execution role needs `aws-marketplace:ViewSubscriptions` and `aws-marketplace:Subscribe` permissions
+4. Invoke the model once from your admin CLI to activate the subscription: `aws bedrock-runtime converse --model-id anthropic.claude-3-7-sonnet-20250219-v1:0 --region eu-west-2 --messages '[{"role":"user","content":[{"text":"hello"}]}]'`
+5. Wait 5 minutes for propagation, then set `BEDROCK_MODEL_ID=anthropic.claude-3-7-sonnet-20250219-v1:0` on the Lambda
+
+> **Note:** If you get `AccessDeniedException` with a marketplace error on the Lambda, it means the Anthropic subscription hasn't propagated to the Lambda role yet. Use Amazon Nova Pro in the meantime — it requires no marketplace subscription.
 
 ---
 
@@ -206,54 +217,60 @@ curl http://localhost:3000/health
 
 ## Deployment
 
-### Quick deploy (sandbox)
+### Terraform (recommended)
 
 ```bash
-./infrastructure/deploy.sh --environment sandbox
-# or from the project root:
-./deploy-now.sh
+cd infrastructure-terraform
+
+# Build the Lambda deployment package
+bash build.sh
+
+# Initialize Terraform
+terraform init
+
+# Review the plan
+terraform plan -var="execution_mode=SANDBOX_LIVE"
+
+# Deploy
+terraform apply -var="execution_mode=SANDBOX_LIVE"
 ```
 
-`infrastructure/samconfig.toml` holds default parameter values so you can re-run `sam deploy` without specifying all flags every time. Edit it before your first deploy to set your region, stack name, and S3 bucket.
+The `build.sh` script creates `lambda.zip` with cross-compiled dependencies for the Lambda `arm64`/`python3.13` runtime. Re-run it after any code or dependency change.
 
-### Production deploy (SAM)
+#### Terraform variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `aws_region` | `eu-west-2` | AWS region |
+| `environment` | `sandbox` | `sandbox` \| `staging` \| `production` |
+| `execution_mode` | `DRY_RUN` | `SANDBOX_LIVE` (real AWS calls) \| `DRY_RUN` (simulate) |
+| `bedrock_model_id` | `anthropic.claude-3-7-sonnet-20250219-v1:0` | Bedrock model ID |
+| `lambda_runtime` | `python3.13` | Lambda Python runtime |
+| `lambda_architecture` | `arm64` | Lambda CPU architecture |
+| `cors_allowed_origin` | `null` | CORS origin for browser clients |
+
+#### Updating the Lambda code
+
+After code changes in `src/`:
 
 ```bash
-cd infrastructure
-
-# Build (use --use-container for reproducible builds)
-sam build --use-container
-
-# Deploy to production
-sam deploy \
-  --stack-name opsagent-controller-production \
-  --parameter-overrides \
-    Environment=production \
-    ExecutionMode=SANDBOX_LIVE \
-    CreateTestResources=false \
-    EnableDynamoDBEncryption=true \
-    BedrockModelId=anthropic.claude-3-5-sonnet-20241022-v2:0 \
-    CorsAllowedOrigin=https://your-app.example.com \
-    AlarmEmailEndpoint=platform-team@company.com \
-  --capabilities CAPABILITY_IAM \
+cd infrastructure-terraform
+bash build.sh
+aws lambda update-function-code \
+  --function-name opsagent-controller-sandbox \
+  --zip-file fileb://lambda.zip \
   --region eu-west-2
 ```
 
-### Deploy parameters
+### SAM / CloudFormation (alternative)
 
-| Parameter | Default | Description |
-|---|---|---|
-| `Environment` | `sandbox` | `sandbox` \| `staging` \| `production` |
-| `ExecutionMode` | `SANDBOX_LIVE` | `SANDBOX_LIVE` \| `DRY_RUN` \| `LOCAL_MOCK` |
-| `BedrockModelId` | `anthropic.claude-3-5-sonnet-20241022-v2:0` | Bedrock foundation model ID |
-| `LLMProvider` | `bedrock` | `bedrock` \| `openai` \| `azure_openai` |
-| `EnableDynamoDBEncryption` | `true` | Enable KMS encryption on DynamoDB tables |
-| `CreateTestResources` | `true` | Deploy a tagged test EC2 instance (requires `VpcId`/`SubnetId`) |
-| `VpcId` | `` | VPC for test resources |
-| `SubnetId` | `` | Subnet for test EC2 instance |
-| `CorsAllowedOrigin` | `null` | Allowed CORS origin (e.g. `https://app.company.com`) |
-| `AlarmEmailEndpoint` | `` | Email for CloudWatch alarm SNS notifications |
-| `AmazonQAppId` | `` | Amazon Q Business application ID (optional) |
+SAM templates are in `infrastructure/template.yaml`. Note: AWS accounts with the `EarlyValidation::ResourceExistenceCheck` hook enabled may need to use `aws cloudformation create-stack` directly instead of `sam deploy` (which uses changesets that can trigger the hook).
+
+```bash
+cd infrastructure
+sam build
+sam deploy --config-env sandbox --no-confirm-changeset
+```
 
 ---
 
@@ -261,83 +278,84 @@ sam deploy \
 
 ### 1. Set a strong API key
 
-The default API key value (`changeme-...`) must be replaced immediately:
-
 ```bash
 SECURE_KEY=$(openssl rand -base64 32)
 aws ssm put-parameter \
   --name "/opsagent/api-key" \
   --value "$SECURE_KEY" \
   --type "SecureString" \
-  --overwrite
+  --overwrite \
+  --region eu-west-2
 ```
 
 ### 2. Configure the user allow-list
 
 ```bash
-# Set allowed users (comma-separated email addresses)
 aws ssm put-parameter \
-  --name "/opsagent/allowed-users" \
-  --value "alice@company.com,bob@company.com" \
-  --type "StringList" \
-  --overwrite
+  --name "/opsagent/user-allow-list" \
+  --value '["alice@company.com","bob@company.com"]' \
+  --type "String" \
+  --overwrite \
+  --region eu-west-2
 
 # Optionally allow all users from a domain
 aws ssm put-parameter \
-  --name "/opsagent/allowed-users" \
-  --value "*@company.com" \
-  --type "StringList" \
-  --overwrite
+  --name "/opsagent/user-allow-list" \
+  --value '["*@company.com"]' \
+  --type "String" \
+  --overwrite \
+  --region eu-west-2
 ```
 
 ### 3. Retrieve API endpoint and key
 
 ```bash
-STACK=opsagent-controller-production
+# Get the API Gateway ID
+API_ID=$(aws apigateway get-rest-apis --region eu-west-2 \
+  --query 'items[?contains(name,`opsagent-controller`)].id' --output text)
 
-API_ENDPOINT=$(aws cloudformation describe-stacks \
-  --stack-name $STACK \
-  --query 'Stacks[0].Outputs[?OutputKey==`PluginApiEndpointUrl`].OutputValue' \
-  --output text)
+API_ENDPOINT="https://${API_ID}.execute-api.eu-west-2.amazonaws.com/sandbox"
 
-# Retrieve the actual API key value from API Gateway
-KEY_ID=$(aws ssm get-parameter \
-  --name "/opsagent/plugin-api-key-production" \
-  --query 'Parameter.Value' --output text)
+# Get the API key value
+KEY_ID=$(aws apigateway get-api-keys --region eu-west-2 \
+  --query 'items[?contains(name,`opsagent`)].id' --output text)
 
-PLUGIN_API_KEY=$(aws apigateway get-api-key \
-  --api-key "$KEY_ID" --include-value \
-  --query 'value' --output text)
+API_KEY=$(aws apigateway get-api-key --api-key "$KEY_ID" \
+  --include-value --region eu-west-2 --query 'value' --output text)
 
 echo "Endpoint: $API_ENDPOINT"
-echo "API Key:  $PLUGIN_API_KEY"
+echo "API Key:  $API_KEY"
 ```
 
 ### 4. Validate deployment
 
 ```bash
-# Health check
+# Health check (no auth needed)
 curl -s "$API_ENDPOINT/health" | jq .
 
-# Run the built-in validation script
-./infrastructure/validate-deployment.sh --environment production
-
-# Manual diagnostic operation test
-curl -s -X POST "$API_ENDPOINT/operations/diagnostic" \
+# Test a diagnostic operation
+curl -s -X POST "$API_ENDPOINT/chat" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $PLUGIN_API_KEY" \
+  -H "x-api-key: $API_KEY" \
   -d '{
-    "operation": "get_ec2_status",
-    "parameters": {"instance_id": "i-0000000000000000"},
-    "user_context": {"user_id": "alice@company.com"}
+    "messageText": "get CloudWatch CPU metrics for instance i-0123456789abcdef0",
+    "userId": "alice@company.com",
+    "channel": "web"
   }' | jq .
 ```
 
-### 5. API key rotation
+### 5. Switch LLM model (optional)
+
+The default is Amazon Nova Pro (no marketplace subscription needed). To switch to Claude:
 
 ```bash
-./infrastructure/configure.sh rotate-keys --environment production
+aws lambda update-function-configuration \
+  --function-name opsagent-controller-sandbox \
+  --environment "Variables={...,BEDROCK_MODEL_ID=anthropic.claude-3-7-sonnet-20250219-v1:0}" \
+  --region eu-west-2
 ```
+
+See [Prerequisites → Bedrock model access](#prerequisites) for Anthropic-specific setup steps.
 
 ---
 
@@ -382,12 +400,32 @@ See [docs/teams-integration.md](docs/teams-integration.md) and [docs/TEAMS_APP_S
 
 **Quick summary:**
 
-1. Register a Bot Framework app in Azure Portal — note the App ID and secret.
-2. Store the secret: `aws ssm put-parameter --name /opsagent/teams-bot-app-secret --value <secret> --type SecureString`
-3. Set `TEAMS_BOT_APP_ID` in your Lambda environment variables.
-4. Configure the bot messaging endpoint to `$API_ENDPOINT/chat`.
+1. Register a Bot Framework app in Azure (Single Tenant):
+   ```bash
+   az login --tenant YOUR_TENANT_ID
+   az ad app create --display-name "OpsAgent AWS Bot" --sign-in-audience AzureADMyOrg
+   az ad app credential reset --id APP_ID --display-name "Bot Secret" --years 1
+   az group create --name opsagent-rg --location uksouth
+   az bot create --resource-group opsagent-rg --name opsagent-teams-bot \
+     --app-type SingleTenant --appid APP_ID --tenant-id TENANT_ID \
+     --endpoint "$API_ENDPOINT/chat"
+   az bot msteams create --resource-group opsagent-rg --name opsagent-teams-bot
+   ```
+2. Store credentials in AWS SSM:
+   ```bash
+   aws ssm put-parameter --name /opsagent/teams-bot-app-id --value "APP_ID" --type String --overwrite --region eu-west-2
+   aws ssm put-parameter --name /opsagent/teams-bot-app-secret --value "APP_SECRET" --type SecureString --overwrite --region eu-west-2
+   ```
+3. Upload the Teams app manifest (`teams-app/opsagent-teams-app.zip`) via Teams → Apps → Upload a custom app.
 
-> **Slack:** Slack can post to the `/chat` endpoint using an outgoing webhook, but there is no built-in Slack signature verification or channel adapter yet. A custom Slack adapter would need to be added to `src/channel_adapters.py`.
+**Requirements:** A Microsoft 365 tenant with Teams enabled. Personal Azure accounts without Teams cannot test the bot in Teams — use the Azure Portal "Test in Web Chat" or curl the API directly instead.
+
+**Teardown:**
+```bash
+az bot delete --resource-group opsagent-rg --name opsagent-teams-bot
+az group delete --name opsagent-rg --yes --no-wait
+az ad app delete --id APP_ID
+```
 
 ---
 
