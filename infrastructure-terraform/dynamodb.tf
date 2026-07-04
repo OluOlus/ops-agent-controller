@@ -39,7 +39,7 @@ resource "aws_dynamodb_table" "audit" {
   }
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 
@@ -94,7 +94,7 @@ resource "aws_dynamodb_table" "incidents" {
   }
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 
@@ -128,6 +128,6 @@ resource "aws_dynamodb_table" "approval_gate" {
   }
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
