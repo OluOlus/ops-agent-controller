@@ -331,30 +331,11 @@ terraform init
 terraform apply
 ```
 
-### Deploying to different environments
-
-Use `terraform.tfvars` or `-var` flags to target different environments. Each environment gets its own isolated set of resources (Lambda, DynamoDB, API Gateway stage, etc).
-
-#### Sandbox (testing with real AWS calls)
+### Production deployment
 
 ```bash
-terraform apply \
-  -var="environment=sandbox" \
-  -var="execution_mode=SANDBOX_LIVE"
-```
-
-#### Staging (validate before production)
-
-```bash
-terraform apply \
-  -var="environment=staging" \
-  -var="execution_mode=SANDBOX_LIVE" \
-  -var="cors_allowed_origin=https://staging.company.com"
-```
-
-#### Production
-
-```bash
+cd infrastructure-terraform
+bash build.sh
 terraform apply \
   -var="environment=prod" \
   -var="execution_mode=SANDBOX_LIVE" \
@@ -362,21 +343,11 @@ terraform apply \
   -var="alarm_email=platform-team@company.com"
 ```
 
-#### DRY_RUN mode (CI/CD validation — no real AWS mutations)
-
-```bash
-terraform apply \
-  -var="environment=ci" \
-  -var="execution_mode=DRY_RUN"
-```
-
 ### Deploying to a different AWS account or region
 
 ```bash
-# Switch AWS profile
-export AWS_PROFILE=production-account
+export AWS_PROFILE=your-account-profile
 
-# Deploy to a different region
 terraform apply \
   -var="aws_region=us-east-1" \
   -var="environment=prod"
@@ -422,10 +393,11 @@ aws lambda update-function-code \
   --region eu-west-2
 ```
 
-### Destroying an environment
+### Destroying the deployment
 
 ```bash
-terraform destroy -var="environment=sandbox"
+cd infrastructure-terraform
+terraform destroy
 ```
 
 ---
