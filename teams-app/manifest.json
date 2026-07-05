@@ -1,12 +1,13 @@
 {
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
   "manifestVersion": "1.17",
   "version": "1.0.0",
-  "id": "9d8c5d6a-fe2f-4ce2-8955-07e14b9fa7fd",
+  "id": "8001ccf9-a80b-4a46-bc07-1da3a25780de",
   "developer": {
-    "name": "Platform Engineering",
-    "websiteUrl": "https://github.com",
-    "privacyUrl": "https://github.com",
-    "termsOfUseUrl": "https://github.com"
+    "name": "Limesoft",
+    "websiteUrl": "https://github.com/OluOlus/ops-agent-controller",
+    "privacyUrl": "https://github.com/OluOlus/ops-agent-controller",
+    "termsOfUseUrl": "https://github.com/OluOlus/ops-agent-controller"
   },
   "name": {
     "short": "OpsAgent AWS",
@@ -23,7 +24,7 @@
   "accentColor": "#FF9900",
   "bots": [
     {
-      "botId": "9d8c5d6a-fe2f-4ce2-8955-07e14b9fa7fd",
+      "botId": "8001ccf9-a80b-4a46-bc07-1da3a25780de",
       "scopes": ["personal", "team", "groupChat"],
       "commandLists": [
         {
@@ -32,8 +33,8 @@
             { "title": "health", "description": "Check system status" },
             { "title": "help", "description": "Show available commands" },
             { "title": "describe instance", "description": "Get EC2 instance details" },
-            { "title": "cpu metrics", "description": "View CPU metrics for an instance" },
-            { "title": "reboot instance", "description": "Reboot an EC2 instance (requires approval)" }
+            { "title": "cpu metrics", "description": "View CPU metrics" },
+            { "title": "reboot instance", "description": "Reboot EC2 (requires approval)" }
           ]
         }
       ],
@@ -43,6 +44,6 @@
   ],
   "permissions": ["identity", "messageTeamMembers"],
   "validDomains": [
-    "cj50a580x5.execute-api.eu-west-2.amazonaws.com"
+    "c6kpu67v33.execute-api.eu-west-2.amazonaws.com"
   ]
 }
