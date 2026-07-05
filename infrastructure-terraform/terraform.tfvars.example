@@ -1,0 +1,41 @@
+# =============================================================================
+# OpsAgent Controller - Terraform Variables
+# =============================================================================
+# Copy this file to terraform.tfvars and fill in your values:
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# Then deploy:
+#   bash build.sh
+#   terraform init
+#   terraform apply
+# =============================================================================
+
+# --- Core ---
+aws_region     = "eu-west-2"
+environment    = "prod"           # prod | staging | sandbox
+execution_mode = "SANDBOX_LIVE"   # SANDBOX_LIVE (real AWS calls) | DRY_RUN (simulate)
+
+# --- Lambda ---
+lambda_runtime      = "python3.13"
+lambda_architecture = "arm64"     # arm64 (Graviton, cheaper) | x86_64
+lambda_memory_size  = 1024
+lambda_timeout      = 60
+
+# --- LLM ---
+llm_provider    = "bedrock"
+bedrock_model_id = "amazon.nova-pro-v1:0"   # Works immediately. For Claude: "anthropic.claude-3-7-sonnet-20250219-v1:0" (requires Anthropic use case form)
+
+# --- Security ---
+cors_allowed_origin    = "null"             # Restrictive default. Set to your app URL for browser access.
+api_key_parameter_name = "/opsagent/api-key"
+
+# --- Teams Bot (optional - requires Azure Bot Service registration) ---
+# teams_bot_app_id     = "your-azure-app-id"
+# teams_bot_app_secret = "your-azure-app-secret"
+
+# --- Monitoring (optional) ---
+# alarm_email        = "platform-team@company.com"
+log_retention_days = 90
+
+# --- Amazon Q Business (optional) ---
+# amazon_q_app_id = "your-q-business-app-id"
