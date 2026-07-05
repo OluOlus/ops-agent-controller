@@ -89,18 +89,40 @@ class BedrockLLMProvider(LLMProvider):
         """Get available tool definitions for the LLM"""
         return [
             {
+                "name": "aws_read",
+                "description": "Execute any read-only AWS API call. Use this to list, describe, or get information from ANY AWS service (S3, RDS, Lambda, ECS, DynamoDB, Route53, etc). Only read operations (describe_*, list_*, get_*) are allowed.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "service": {
+                            "type": "string",
+                            "description": "AWS service name (e.g. ec2, s3, rds, lambda, ecs, elbv2, route53, dynamodb, sqs, sns, cloudfront, elasticache, eks, ecr, autoscaling, apigateway)"
+                        },
+                        "action": {
+                            "type": "string",
+                            "description": "The API action to call (must start with describe_, list_, or get_). Examples: list_buckets, describe_instances, describe_db_instances, list_functions, list_clusters"
+                        },
+                        "parameters": {
+                            "type": "object",
+                            "description": "Optional parameters for the API call (e.g. filters, instance IDs)"
+                        }
+                    },
+                    "required": ["service", "action"]
+                }
+            },
+            {
                 "name": "get_cloudwatch_metrics",
-                "description": "Retrieve CloudWatch metrics for AWS resources",
+                "description": "Retrieve CloudWatch metrics for AWS resources with time-based analysis",
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "namespace": {
                             "type": "string",
-                            "description": "CloudWatch namespace (e.g., AWS/EC2, AWS/ECS)"
+                            "description": "CloudWatch namespace (e.g., AWS/EC2, AWS/ECS, AWS/RDS)"
                         },
                         "metric_name": {
                             "type": "string",
-                            "description": "Metric name (e.g., CPUUtilization, NetworkIn)"
+                            "description": "Metric name (e.g., CPUUtilization, NetworkIn, DatabaseConnections)"
                         },
                         "resource_id": {
                             "type": "string",
@@ -116,35 +138,88 @@ class BedrockLLMProvider(LLMProvider):
                 }
             },
             {
-                "name": "describe_ec2_instances",
-                "description": "Get information about EC2 instances",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "instance_ids": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of instance IDs to describe"
-                        },
-                        "filters": {
-                            "type": "object",
-                            "description": "Filters for instance selection (e.g., tags, state)"
-                        }
-                    }
-                }
-            },
-            {
                 "name": "reboot_ec2_instance",
-                "description": "Reboot an EC2 instance (requires approval)",
+                "description": "Reboot an EC2 instance. This is a WRITE operation that requires explicit user approval before execution.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "instance_id": {
                             "type": "string",
-                            "description": "EC2 instance ID to reboot"
+                            "description": "EC2 instance ID to reboot (e.g. i-0abc123def456)"
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Reason for the reboot"
                         }
                     },
                     "required": ["instance_id"]
+                }
+            },
+            {
+                "name": "scale_ecs_service",
+                "description": "Scale an ECS service to a different number of tasks. This is a WRITE operation that requires explicit user approval.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "cluster": {
+                            "type": "string",
+                            "description": "ECS cluster name"
+                        },
+                        "service": {
+                            "type": "string",
+                            "description": "ECS service name"
+                        },
+                        "desired_count": {
+                            "type": "integer",
+                            "description": "Desired number of tasks"
+                        }
+                    },
+                    "required": ["cluster", "service", "desired_count"]
+                }
+            },
+            {
+                "name": "search_cloudtrail_events",
+                "description": "Search CloudTrail for recent API activity and events",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "filter": {
+                            "type": "object",
+                            "properties": {
+                                "event_name": {"type": "string"},
+                                "resource_name": {"type": "string"},
+                                "user_name": {"type": "string"}
+                            }
+                        },
+                        "time_window": {
+                            "type": "string",
+                            "description": "Time window (1h, 6h, 12h, 24h, 7d)",
+                            "default": "24h"
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "default": 20
+                        }
+                    },
+                    "required": ["filter"]
+                }
+            },
+            {
+                "name": "create_incident_record",
+                "description": "Create an incident record for tracking purposes",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "summary": {
+                            "type": "string",
+                            "description": "Brief incident summary"
+                        },
+                        "severity": {
+                            "type": "string",
+                            "description": "Severity level: low, medium, high, critical"
+                        }
+                    },
+                    "required": ["summary", "severity"]
                 }
             }
         ]
@@ -173,12 +248,14 @@ Available tools:
 - post_summary_to_channel: Send a notification
 
 Guidelines:
+- ALWAYS execute tools directly — do not just describe what you would do, actually call the tool
 - Use read-only tools first to gather information
 - Only suggest write operations when necessary
 - Be specific about resource identifiers
 - Explain your reasoning clearly
 - If unsure, ask for clarification
 - For casual questions (fun facts, jokes, greetings), respond conversationally without calling tools
+- When a user asks to list or describe resources, immediately call aws_read with the correct parameters
 
 Respond with structured tool calls in JSON format when tools are needed. For conversational messages, just respond naturally."""
     
@@ -306,7 +383,7 @@ Respond with structured tool calls in JSON format when tools are needed. For con
                     tool_input = tool_use.get('input', {})
                     
                     # Determine if approval is required
-                    requires_approval = tool_name in ['reboot_ec2_instance']
+                    requires_approval = tool_name in ['reboot_ec2_instance', 'reboot_ec2', 'scale_ecs_service']
                     
                     tool_call = ToolCall(
                         tool_name=tool_name,
