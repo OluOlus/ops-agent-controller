@@ -379,8 +379,9 @@ def get_bot_framework_token() -> Optional[str]:
         return None
 
     try:
-        # Bot Framework always uses botframework.com for OAuth, regardless of bot configuration
-        token_url = "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token"
+        # For SingleTenant bots, use the tenant-specific token endpoint
+        tenant_id = os.environ.get("TEAMS_BOT_TENANT_ID", "8b8c8f0f-37bf-4f41-b1c2-be5314ad18b8")
+        token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
 
         data = {
             "grant_type": "client_credentials",
