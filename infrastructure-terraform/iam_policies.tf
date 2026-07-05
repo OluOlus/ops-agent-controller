@@ -233,3 +233,69 @@ resource "aws_iam_role_policy" "system" {
   role   = aws_iam_role.opsagent_execution.id
   policy = data.aws_iam_policy_document.system.json
 }
+
+# Generic read-only access to all AWS services for the aws_read tool
+data "aws_iam_policy_document" "generic_read" {
+  statement {
+    sid    = "AllowDescribeListGet"
+    effect = "Allow"
+    actions = [
+      "s3:ListBucket",
+      "s3:ListAllMyBuckets",
+      "s3:GetBucketLocation",
+      "s3:GetBucketTagging",
+      "rds:DescribeDBInstances",
+      "rds:DescribeDBClusters",
+      "rds:ListTagsForResource",
+      "lambda:ListFunctions",
+      "lambda:GetFunction",
+      "lambda:ListEventSourceMappings",
+      "ecs:DescribeServices",
+      "ecs:DescribeClusters",
+      "ecs:DescribeTasks",
+      "ecs:ListClusters",
+      "ecs:ListServices",
+      "ecs:ListTasks",
+      "route53:ListHostedZones",
+      "route53:ListResourceRecordSets",
+      "route53:GetHealthCheck",
+      "dynamodb:ListTables",
+      "dynamodb:DescribeTable",
+      "sqs:ListQueues",
+      "sqs:GetQueueAttributes",
+      "sns:ListTopics",
+      "sns:ListSubscriptions",
+      "sns:GetTopicAttributes",
+      "elasticache:DescribeCacheClusters",
+      "elasticache:DescribeReplicationGroups",
+      "cloudfront:ListDistributions",
+      "cloudfront:GetDistribution",
+      "autoscaling:DescribeAutoScalingGroups",
+      "autoscaling:DescribeLaunchConfigurations",
+      "eks:ListClusters",
+      "eks:DescribeCluster",
+      "ecr:DescribeRepositories",
+      "ecr:ListImages",
+      "kms:ListKeys",
+      "kms:DescribeKey",
+      "kms:ListAliases",
+      "secretsmanager:ListSecrets",
+      "ssm:DescribeParameters",
+      "elasticloadbalancing:DescribeLoadBalancers",
+      "elasticloadbalancing:DescribeTargetGroups",
+      "elasticloadbalancing:DescribeListeners",
+      "apigateway:GET",
+      "tag:GetResources",
+      "tag:GetTagKeys",
+      "resource-groups:ListGroups",
+      "resource-groups:ListGroupResources",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "generic_read" {
+  name   = "OpsAgentGenericReadPolicy"
+  role   = aws_iam_role.opsagent_execution.id
+  policy = data.aws_iam_policy_document.generic_read.json
+}

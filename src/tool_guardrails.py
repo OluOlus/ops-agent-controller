@@ -81,6 +81,34 @@ class ToolGuardrails:
         """Initialize tool policies with schemas and requirements"""
         policies = {}
         
+        # Generic AWS read tool — any describe/list/get action on any service (read-only)
+        policies["aws_read"] = ToolPolicy(
+            tool_name="aws_read",
+            allowed=True,
+            requires_approval=False,
+            allowed_execution_modes={ExecutionMode.LOCAL_MOCK, ExecutionMode.DRY_RUN, ExecutionMode.SANDBOX_LIVE},
+            requires_resource_tags=False,
+            schema={
+                "type": "object",
+                "properties": {
+                    "service": {
+                        "type": "string",
+                        "description": "AWS service name (e.g. ec2, s3, rds, lambda, ecs, route53)"
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "API action (must be read-only: describe_*, list_*, get_*)"
+                    },
+                    "parameters": {
+                        "type": "object",
+                        "description": "Optional parameters to pass to the API call"
+                    }
+                },
+                "required": ["service", "action"],
+                "additionalProperties": False
+            }
+        )
+        
         # CloudWatch metrics tool (read-only)
         policies["get_cloudwatch_metrics"] = ToolPolicy(
             tool_name="get_cloudwatch_metrics",

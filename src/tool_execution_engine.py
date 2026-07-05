@@ -18,6 +18,7 @@ from src.tool_guardrails import ToolGuardrails, GuardrailViolation, ResourceTagV
 from src.aws_diagnosis_tools import CloudWatchMetricsTool, EC2DescribeTool, EC2StatusTool, ALBTargetHealthTool, CloudTrailSearchTool
 from src.aws_remediation_tools import EC2RebootTool, ECSScalingTool
 from src.workflow_tools import IncidentRecordTool, ChannelNotificationTool
+from src.aws_generic_tool import AWSGenericReadTool
 
 boto3 = SimpleNamespace(client=_boto3.client)
 
@@ -82,8 +83,14 @@ class ToolExecutionEngine:
 
         self._sync_tool_clients()
         
+        # Initialize generic AWS read tool
+        self.aws_generic_read_tool = AWSGenericReadTool(execution_mode)
+        
         # Tool implementations
         self.tool_implementations = {
+            # Generic AWS read (any service, any describe/list/get action)
+            "aws_read": self._execute_aws_read,
+            
             # Diagnostic operations (no approval required)
             "get_cloudwatch_metrics": self._execute_cloudwatch_metrics,
             "get_ec2_status": self._execute_get_ec2_status,
@@ -392,6 +399,17 @@ class ToolExecutionEngine:
         Requirements: 6.1, 6.2, 6.3
         """
         return self.channel_tool.execute(tool_call, context.correlation_id)
+
+    def _execute_aws_read(
+        self,
+        tool_call: ToolCall,
+        context: ExecutionContext
+    ) -> ToolResult:
+        """
+        Execute a generic AWS read-only API call.
+        Allows the LLM to call any describe/list/get action on any AWS service.
+        """
+        return self.aws_generic_read_tool.execute(tool_call, context.correlation_id)
 
     def _execute_cloudwatch_metrics(
         self,
