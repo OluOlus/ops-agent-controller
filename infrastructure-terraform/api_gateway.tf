@@ -9,7 +9,7 @@ locals {
     operations_propose    = { path_part = "propose", parent = "operations", method = "POST", api_key_required = true }
     operations_approve    = { path_part = "approve", parent = "operations", method = "POST", api_key_required = true }
     operations_workflow   = { path_part = "workflow", parent = "operations", method = "POST", api_key_required = true }
-    chat                  = { path_part = "chat", parent = "root", method = "POST", api_key_required = true }
+    chat                  = { path_part = "chat", parent = "root", method = "POST", api_key_required = false }
   }
 }
 
