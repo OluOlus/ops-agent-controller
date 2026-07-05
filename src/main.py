@@ -721,6 +721,13 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
             except (json.JSONDecodeError, TypeError):
                 incoming_activity = {}
 
+            # Non-message activities (conversationUpdate, installationUpdate, typing, etc.)
+            # are lifecycle events — acknowledge with 200 OK without processing
+            activity_type = incoming_activity.get("type", "")
+            if activity_type != "message":
+                logger.info(f"Acknowledging Teams lifecycle activity: {activity_type}")
+                return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": ""}
+
         # Normalize the incoming message first (needed for authentication)
         internal_message = channel_adapter.normalize_message(event)
         correlation_id = internal_message.correlation_id

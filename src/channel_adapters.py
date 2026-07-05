@@ -4,6 +4,7 @@ Requirements: 1.1, 1.2, 1.5
 """
 import json
 import logging
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Dict, Any, Optional, List
@@ -481,24 +482,13 @@ class TeamsChannelAdapter(ChannelAdapter):
             
         Requirements: 1.4, 5.5
         """
-        # For Teams Bot Framework, we should validate JWT tokens
-        # For MVP, we'll do basic validation and rely on Azure Bot Service security
-        
         # Check for Teams-specific headers
         headers = raw_request.get("headers", {})
         
         # Teams Bot Framework sends Authorization header with JWT
         auth_header = headers.get("authorization") or headers.get("Authorization")
-        if not auth_header:
-            logger.warning("Missing Authorization header in Teams request")
-            return False
         
-        # Basic JWT format validation (Bearer token)
-        if not auth_header.startswith("Bearer "):
-            logger.warning("Invalid Authorization header format in Teams request")
-            return False
-        
-        # Validate request has Teams Bot Framework structure
+        # Validate request has Bot Framework Activity structure
         try:
             if isinstance(raw_request.get("body"), str):
                 activity = json.loads(raw_request["body"])
@@ -506,19 +496,35 @@ class TeamsChannelAdapter(ChannelAdapter):
                 activity = raw_request.get("body", raw_request)
             
             # Check for required Bot Framework Activity fields
-            required_fields = ["type", "id", "from", "conversation"]
+            required_fields = ["type", "from", "conversation"]
             for field in required_fields:
                 if field not in activity:
                     logger.warning(f"Missing required field '{field}' in Teams activity")
                     return False
             
-            # Validate it's from Teams channel
+            # Allow both Teams and Web Chat channels (Azure Bot "Test in Web Chat" uses webchat)
             channel_id = activity.get("channelId", "")
-            if channel_id and channel_id != "msteams":
+            if channel_id and channel_id not in ("msteams", "webchat", "directline", "emulator", ""):
                 logger.warning(f"Unexpected channelId: {channel_id}")
                 return False
             
-            return True
+            # If Authorization header present, validate it's a Bearer token
+            if auth_header:
+                if not auth_header.startswith("Bearer "):
+                    logger.warning("Invalid Authorization header format in Teams request")
+                    return False
+                # Token is present and well-formed — trust Bot Service routing
+                return True
+            
+            # If no auth header but activity structure is valid, allow in non-production
+            # Azure Web Chat test doesn't always forward the auth header through API Gateway
+            execution_mode = os.environ.get("EXECUTION_MODE", "SANDBOX_LIVE")
+            if execution_mode != "production":
+                logger.info("Allowing Bot Framework request without auth header in non-production mode")
+                return True
+            
+            logger.warning("Missing Authorization header in Teams request")
+            return False
             
         except (json.JSONDecodeError, TypeError) as e:
             logger.warning(f"Invalid Teams activity format: {e}")
@@ -989,7 +995,7 @@ def detect_channel_type(raw_request: Dict[str, Any]) -> ChannelType:
         if (body.get("type") == "message" and 
             "from" in body and 
             "conversation" in body and
-            body.get("channelId") in ["msteams", None]):
+            body.get("channelId") in ["msteams", "webchat", "directline", "emulator", None]):
             return ChannelType.TEAMS
     except (json.JSONDecodeError, TypeError):
         pass

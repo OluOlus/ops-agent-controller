@@ -682,14 +682,17 @@ class RequestSignatureValidator:
                 body = request_data.get("body", {})
             
             # Teams Bot Framework Activity has these required fields
-            required_fields = ["type", "id", "from", "conversation"]
+            required_fields = ["type", "from", "conversation"]
             for field in required_fields:
                 if field not in body:
                     return False, f"Missing required Teams activity field: {field}"
             
-            # Validate it's a message activity
+            # Non-message activities (conversationUpdate, installationUpdate, etc.)
+            # are lifecycle events — they don't need processing, just acknowledge them
             if body.get("type") != "message":
-                return False, f"Unsupported Teams activity type: {body.get('type')}"
+                # Return True so the handler can return 200 OK without processing
+                logger.info(f"Teams lifecycle activity: {body.get('type')} — acknowledging")
+                return True, None
             
             logger.info(f"Teams Bearer token validation successful: {correlation_id}")
             return True, None
