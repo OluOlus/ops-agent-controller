@@ -249,13 +249,12 @@ Available tools:
 
 Guidelines:
 - ALWAYS execute tools directly — do not just describe what you would do, actually call the tool
+- When investigating errors in a Lambda, check CloudWatch Logs: use aws_read with service="logs", action="filter_log_events", parameters={"logGroupName": "/aws/lambda/FUNCTION_NAME", "limit": 20, "startTime": recent_timestamp}
+- When investigating a stopped/down instance, use aws_read with service="ec2", action="describe_instances", parameters={"InstanceIds": ["i-xxx"]} to get its state and reason
+- When user says a service "is down" or "not working", check: 1) the resource state 2) CloudWatch metrics/alarms 3) recent CloudTrail events
 - Use read-only tools first to gather information
 - Only suggest write operations when necessary
-- Be specific about resource identifiers
-- Explain your reasoning clearly
-- If unsure, ask for clarification
 - For casual questions (fun facts, jokes, greetings), respond conversationally without calling tools
-- When a user asks to list or describe resources, immediately call aws_read with the correct parameters
 
 Respond with structured tool calls in JSON format when tools are needed. For conversational messages, just respond naturally."""
     
@@ -437,17 +436,21 @@ Respond with structured tool calls in JSON format when tools are needed. For con
             context_text = "\n".join(results_context)
             
             # Create summary prompt
-            summary_prompt = f"""Summarize these AWS tool results in a short, natural response. Be conversational and direct — like a colleague answering a question. No headers, no numbered lists, no "Overview/Findings/Actions" format. Just tell me what you found.
+            summary_prompt = f"""You are summarizing AWS tool results for a platform engineer in a chat interface (Teams/Slack).
 
 Tool Results:
 {context_text}
 
-Rules:
-- If it's a list of resources, just show the names/IDs in a clean format
-- If something is empty, say so briefly (e.g. "No EC2 instances found in this region")
-- If there's an error, explain it in one sentence
-- Keep it under 3-4 sentences unless the data is complex
-- Don't repeat the tool name unless it adds clarity"""
+Response format rules:
+- Use bullet points or line breaks for lists — never comma-separated
+- For EC2 instances, format each on its own line: "• instance-name (i-xxx) — state"
+- For Lambda functions, show: "• function-name — runtime, memory, timeout"
+- For alarms, show: "• alarm-name — state — description"
+- For S3 buckets, just list names with bullets
+- If something failed or is in a bad state, lead with that
+- Keep it brief — no more than 5-6 lines unless there's a lot of data
+- Never say "tool executed" or "API call returned" — just state the findings
+- If investigating errors, suggest what to check next"""
             
             messages = [
                 {
