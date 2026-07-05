@@ -340,6 +340,11 @@ class UserAuthenticator:
             # Normalize user ID for comparison
             normalized_user_id = user_id.lower().strip()
             
+            # Check for global wildcard — allow all users
+            if "*" in allow_list:
+                logger.info(f"User authorized via global wildcard: {user_id}")
+                return True, None
+            
             # Check if user is in allow-list
             if normalized_user_id in allow_list:
                 logger.info(f"User authorized via allow-list: {user_id}")
@@ -403,10 +408,11 @@ class UserAuthenticator:
             for user in allow_list:
                 if isinstance(user, str) and user.strip():
                     normalized_user = user.strip().lower()
-                    if self._is_valid_user_id(normalized_user) or normalized_user.startswith("*@"):
+                    if normalized_user == "*" or self._is_valid_user_id(normalized_user) or normalized_user.startswith("*@"):
                         normalized_allow_list.append(normalized_user)
                     else:
-                        logger.warning(f"Invalid user ID in allow-list: {user}")
+                        # Teams sends opaque user IDs — accept any non-empty string
+                        normalized_allow_list.append(normalized_user)
             
             # Update cache
             self._user_allow_list_cache = normalized_allow_list
