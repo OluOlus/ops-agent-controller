@@ -437,18 +437,17 @@ Respond with structured tool calls in JSON format when tools are needed. For con
             context_text = "\n".join(results_context)
             
             # Create summary prompt
-            summary_prompt = f"""Based on the following tool execution results, provide a clear, concise summary for a platform engineer:
+            summary_prompt = f"""Summarize these AWS tool results in a short, natural response. Be conversational and direct — like a colleague answering a question. No headers, no numbered lists, no "Overview/Findings/Actions" format. Just tell me what you found.
 
 Tool Results:
 {context_text}
 
-Please provide:
-1. A brief overview of what was checked/executed
-2. Key findings or results
-3. Any recommended next actions
-4. If there were errors, explain what went wrong
-
-Keep the summary professional and actionable."""
+Rules:
+- If it's a list of resources, just show the names/IDs in a clean format
+- If something is empty, say so briefly (e.g. "No EC2 instances found in this region")
+- If there's an error, explain it in one sentence
+- Keep it under 3-4 sentences unless the data is complex
+- Don't repeat the tool name unless it adds clarity"""
             
             messages = [
                 {
