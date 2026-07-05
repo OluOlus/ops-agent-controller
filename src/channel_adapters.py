@@ -670,11 +670,6 @@ class WebChannelAdapter(ChannelAdapter):
         Requirements: 1.2, 1.5
         """
         # Web channel uses simple JSON format
-        if additional_data and additional_data.get("user_id"):
-            user_id = additional_data["user_id"]
-            if user_id not in message:
-                message = f"{message}\n\nUser: {user_id}"
-
         channel_data = {
             "message": message,
             "format": "text",

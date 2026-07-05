@@ -965,12 +965,8 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
             
             summary = "\n".join(summary_parts) if summary_parts else "Operations completed."
         
-        # Add execution mode context to summary
-        mode_context = {
-            ExecutionMode.SANDBOX_LIVE: f" ({internal_message.execution_mode.value})"
-        }.get(internal_message.execution_mode, f" ({internal_message.execution_mode.value})")
-        
-        final_message = f"{llm_response.assistant_message}\n\n{summary}{mode_context}"
+        # Build final response message
+        final_message = f"{llm_response.assistant_message}\n\n{summary}"
 
         # Return Bot Framework format for Teams
         if channel_type == ChannelType.TEAMS and incoming_activity:
@@ -1139,12 +1135,7 @@ def handle_approval_response(
                 error_msg = tool_results[0].error if tool_results else "Unknown error"
                 summary = f"Failed to execute {approval_request.tool_call.tool_name}: {error_msg}"
         
-        # Add execution mode context
-        mode_context = {
-            ExecutionMode.SANDBOX_LIVE: f" ({internal_message.execution_mode.value})"
-        }.get(internal_message.execution_mode, f" ({internal_message.execution_mode.value})")
-        
-        response_message = f"**Approval Granted & Executed**\n\n{summary}{mode_context}\n\nCorrelation ID: {correlation_id}"
+        response_message = f"**Approval Granted & Executed**\n\n{summary}\n\nCorrelation ID: {correlation_id}"
         
         channel_response = channel_adapter.format_response(
             response_message,
