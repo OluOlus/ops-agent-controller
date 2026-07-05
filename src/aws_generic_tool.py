@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 READ_PREFIXES = (
     "describe", "list", "get", "lookup", "search",
     "check", "fetch", "read", "scan", "head",
-    "batch_get", "batch_describe",
+    "batch_get", "batch_describe", "filter",
 )
 
 # Explicitly blocked actions that look like reads but mutate state
