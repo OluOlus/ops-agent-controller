@@ -563,7 +563,8 @@ def _handle_llm_error(
     audit_logger.log_error(error, correlation_id, user_id, {"step": "llm_generation"})
 
     if channel_type == ChannelType.TEAMS and incoming_activity:
-        return create_bot_framework_response(error_message, incoming_activity, correlation_id=correlation_id)
+        send_bot_framework_reply(error_message, incoming_activity, correlation_id=correlation_id)
+        return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": ""}
 
     error_response = channel_adapter.format_error_response(
         error_message,
@@ -918,7 +919,11 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
                 # Return Bot Framework format for Teams
                 if channel_type == ChannelType.TEAMS and incoming_activity:
                     approval_text = approval_response.to_dict().get("message", "Approval required")
-                    return create_bot_framework_response(approval_text, incoming_activity, correlation_id=correlation_id)
+                    success = send_bot_framework_reply(approval_text, incoming_activity, correlation_id=correlation_id)
+                    if success:
+                        return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": ""}
+                    else:
+                        return create_bot_framework_response(approval_text, incoming_activity, correlation_id=correlation_id)
 
                 return create_success_response(approval_response.to_dict(), correlation_id)
         
@@ -1006,7 +1011,8 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         # Return Bot Framework format for Teams if available
         if 'channel_type' in locals() and channel_type == ChannelType.TEAMS and incoming_activity:
             error_message = f"Bad Request: {str(e)}"
-            return create_bot_framework_response(error_message, incoming_activity, correlation_id=correlation_id)
+            send_bot_framework_reply(error_message, incoming_activity, correlation_id=correlation_id)
+            return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": ""}
 
         return create_error_response(400, f"Bad Request: {str(e)}", correlation_id)
     except Exception as e:
@@ -1021,7 +1027,8 @@ def chat_handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
 
         # Return Bot Framework format for Teams if available
         if 'channel_type' in locals() and channel_type == ChannelType.TEAMS and incoming_activity:
-            return create_bot_framework_response("Internal server error", incoming_activity, correlation_id=correlation_id)
+            send_bot_framework_reply("Internal server error", incoming_activity, correlation_id=correlation_id)
+            return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": ""}
 
         return create_error_response(500, "Internal server error", correlation_id)
 
