@@ -321,59 +321,111 @@ curl http://localhost:3000/health
 
 ## Deployment
 
-### Terraform (recommended)
+### Quick start
 
 ```bash
 cd infrastructure-terraform
-
-# Build the Lambda deployment package
+cp terraform.tfvars.example terraform.tfvars  # Edit with your values
 bash build.sh
-
-# Initialize Terraform
 terraform init
-
-# Review the plan
-terraform plan -var="execution_mode=SANDBOX_LIVE"
-
-# Deploy
-terraform apply -var="execution_mode=SANDBOX_LIVE"
+terraform apply
 ```
 
-The `build.sh` script creates `lambda.zip` with cross-compiled dependencies for the Lambda `arm64`/`python3.13` runtime. Re-run it after any code or dependency change.
+### Deploying to different environments
 
-#### Terraform variables
+Use `terraform.tfvars` or `-var` flags to target different environments. Each environment gets its own isolated set of resources (Lambda, DynamoDB, API Gateway stage, etc).
+
+#### Sandbox (testing with real AWS calls)
+
+```bash
+terraform apply \
+  -var="environment=sandbox" \
+  -var="execution_mode=SANDBOX_LIVE"
+```
+
+#### Staging (validate before production)
+
+```bash
+terraform apply \
+  -var="environment=staging" \
+  -var="execution_mode=SANDBOX_LIVE" \
+  -var="cors_allowed_origin=https://staging.company.com"
+```
+
+#### Production
+
+```bash
+terraform apply \
+  -var="environment=prod" \
+  -var="execution_mode=SANDBOX_LIVE" \
+  -var="cors_allowed_origin=https://app.company.com" \
+  -var="alarm_email=platform-team@company.com"
+```
+
+#### DRY_RUN mode (CI/CD validation — no real AWS mutations)
+
+```bash
+terraform apply \
+  -var="environment=ci" \
+  -var="execution_mode=DRY_RUN"
+```
+
+### Deploying to a different AWS account or region
+
+```bash
+# Switch AWS profile
+export AWS_PROFILE=production-account
+
+# Deploy to a different region
+terraform apply \
+  -var="aws_region=us-east-1" \
+  -var="environment=prod"
+```
+
+### Terraform variables reference
 
 | Variable | Default | Description |
 |---|---|---|
-| `aws_region` | `eu-west-2` | AWS region |
-| `environment` | `sandbox` | `sandbox` \| `staging` \| `production` |
-| `execution_mode` | `DRY_RUN` | `SANDBOX_LIVE` (real AWS calls) \| `DRY_RUN` (simulate) |
-| `bedrock_model_id` | `anthropic.claude-3-7-sonnet-20250219-v1:0` | Bedrock model ID |
+| `aws_region` | `eu-west-2` | AWS region to deploy into |
+| `environment` | `prod` | Environment name — used in all resource names |
+| `execution_mode` | `SANDBOX_LIVE` | `SANDBOX_LIVE` (real calls) or `DRY_RUN` (simulate) |
+| `bedrock_model_id` | `amazon.nova-pro-v1:0` | Bedrock model (Nova Pro works without marketplace subscription) |
 | `lambda_runtime` | `python3.13` | Lambda Python runtime |
-| `lambda_architecture` | `arm64` | Lambda CPU architecture |
+| `lambda_architecture` | `arm64` | CPU architecture (arm64 = Graviton, cheaper) |
+| `lambda_memory_size` | `1024` | Lambda memory in MB |
+| `lambda_timeout` | `60` | Lambda timeout in seconds |
 | `cors_allowed_origin` | `null` | CORS origin for browser clients |
+| `api_key_parameter_name` | `/opsagent/api-key` | SSM path for API key |
+| `teams_bot_app_id` | `""` | Azure Bot App ID (leave empty to skip Teams) |
+| `teams_bot_app_secret` | `""` | Azure Bot secret (stored as SecureString) |
+| `alarm_email` | `""` | Email for CloudWatch alarm notifications |
+| `log_retention_days` | `90` | Audit log retention period |
+| `amazon_q_app_id` | `""` | Amazon Q Business app ID (optional) |
 
-#### Updating the Lambda code
+### Building the Lambda package
 
-After code changes in `src/`:
+```bash
+cd infrastructure-terraform
+bash build.sh
+```
+
+This produces `lambda.zip` with cross-compiled dependencies for `arm64`/`python3.13`. Re-run after any change to `src/` or `src/requirements.txt`.
+
+### Updating Lambda code without full redeploy
 
 ```bash
 cd infrastructure-terraform
 bash build.sh
 aws lambda update-function-code \
-  --function-name opsagent-controller-sandbox \
+  --function-name opsagent-controller-prod \
   --zip-file fileb://lambda.zip \
   --region eu-west-2
 ```
 
-### SAM / CloudFormation (alternative)
-
-SAM templates are in `infrastructure/template.yaml`. Note: AWS accounts with the `EarlyValidation::ResourceExistenceCheck` hook enabled may need to use `aws cloudformation create-stack` directly instead of `sam deploy` (which uses changesets that can trigger the hook).
+### Destroying an environment
 
 ```bash
-cd infrastructure
-sam build
-sam deploy --config-env sandbox --no-confirm-changeset
+terraform destroy -var="environment=sandbox"
 ```
 
 ---
