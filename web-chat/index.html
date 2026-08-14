@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpsAgent AWS - Chat</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background: #16213e;
+            border-bottom: 1px solid #0f3460;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        header .logo {
+            width: 36px; height: 36px;
+            background: #ff9900;
+            border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; font-size: 14px; color: #1a1a2e;
+        }
+        header h1 { font-size: 18px; font-weight: 600; }
+        header .status {
+            margin-left: auto;
+            font-size: 12px;
+            color: #4ecca3;
+            display: flex; align-items: center; gap: 6px;
+        }
+        header .status::before {
+            content: '';
+            width: 8px; height: 8px;
+            background: #4ecca3;
+            border-radius: 50%;
+        }
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .message.user {
+            align-self: flex-end;
+            background: #0f3460;
+            border-bottom-right-radius: 4px;
+        }
+        .message.bot {
+            align-self: flex-start;
+            background: #1e2a4a;
+            border: 1px solid #2a3a5a;
+            border-bottom-left-radius: 4px;
+        }
+        .message.bot .meta {
+            font-size: 11px;
+            color: #888;
+            margin-top: 8px;
+            border-top: 1px solid #2a3a5a;
+            padding-top: 6px;
+        }
+        .message.error {
+            background: #2d1b1b;
+            border: 1px solid #5a2020;
+            color: #ff6b6b;
+        }
+        .message.system {
+            align-self: center;
+            background: transparent;
+            color: #666;
+            font-size: 12px;
+        }
+        .typing {
+            align-self: flex-start;
+            color: #888;
+            font-size: 13px;
+            padding: 8px 16px;
+        }
+        .typing::after {
+            content: '...';
+            animation: dots 1.5s infinite;
+        }
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+        .input-area {
+            background: #16213e;
+            border-top: 1px solid #0f3460;
+            padding: 16px 24px;
+            display: flex;
+            gap: 12px;
+        }
+        .input-area input {
+            flex: 1;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: #e0e0e0;
+            font-size: 14px;
+            outline: none;
+        }
+        .input-area input:focus { border-color: #ff9900; }
+        .input-area button {
+            background: #ff9900;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 20px;
+            color: #1a1a2e;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .input-area button:hover { background: #ffad33; }
+        .input-area button:disabled { background: #555; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">OA</div>
+        <h1>OpsAgent AWS</h1>
+        <div class="status" id="status">Connected</div>
+    </header>
+    <div class="chat-container" id="chat">
+        <div class="message system">OpsAgent AWS Operations Assistant — ask about EC2 instances, CloudWatch metrics, or request remediation actions.</div>
+    </div>
+    <div class="input-area">
+        <input type="text" id="input" placeholder="e.g. get CPU metrics for instance i-0abc123 in the last hour" autocomplete="off">
+        <button id="send" onclick="sendMessage()">Send</button>
+    </div>
+
+    <script>
+        const API_URL = 'https://c6kpu67v33.execute-api.eu-west-2.amazonaws.com/prod/chat';
+        const API_KEY = 'b5TIlXKgiNas2ChP94nPu8kRrBIWJKWV5hu5OdnT';
+        const USER_ID = 'o.oluwafemi@limesoftsystem.com';
+
+        const chat = document.getElementById('chat');
+        const input = document.getElementById('input');
+        const sendBtn = document.getElementById('send');
+
+        input.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
+
+        async function sendMessage() {
+            const text = input.value.trim();
+            if (!text) return;
+
+            addMessage(text, 'user');
+            input.value = '';
+            sendBtn.disabled = true;
+
+            const typing = document.createElement('div');
+            typing.className = 'typing';
+            typing.textContent = 'OpsAgent is thinking';
+            chat.appendChild(typing);
+            chat.scrollTop = chat.scrollHeight;
+
+            try {
+                const res = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+                    body: JSON.stringify({ messageText: text, userId: USER_ID, channel: 'web' })
+                });
+                const data = await res.json();
+                typing.remove();
+
+                if (data.success) {
+                    const msg = data.data?.channel_data?.message || data.data?.message || 'No response';
+                    const correlationId = data.data?.correlation_id || '';
+                    const mode = data.data?.channel_data?.execution_mode || '';
+                    addMessage(msg, 'bot', `${mode} | ${correlationId}`);
+                } else {
+                    addMessage(data.error || 'Request failed', 'error');
+                }
+            } catch (err) {
+                typing.remove();
+                addMessage('Network error: ' + err.message, 'error');
+            }
+            sendBtn.disabled = false;
+            input.focus();
+        }
+
+        function addMessage(text, type, meta) {
+            const div = document.createElement('div');
+            div.className = 'message ' + type;
+            div.textContent = text;
+            if (meta) {
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'meta';
+                metaDiv.textContent = meta;
+                div.appendChild(metaDiv);
+            }
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+    </script>
+</body>
+</html>
