@@ -133,6 +133,62 @@
         }
         .input-area button:hover { background: #ffad33; }
         .input-area button:disabled { background: #555; cursor: not-allowed; }
+        .settings-btn {
+            margin-left: 12px;
+            background: transparent;
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            color: #e0e0e0;
+            width: 28px; height: 28px;
+            cursor: pointer;
+        }
+        .settings-btn:hover { border-color: #ff9900; }
+        .settings-panel {
+            flex: 1;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .settings-card {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 400px;
+            width: 100%;
+        }
+        .settings-card h2 { font-size: 16px; margin-bottom: 8px; }
+        .settings-card p { font-size: 12px; color: #888; margin-bottom: 16px; line-height: 1.4; }
+        .settings-card label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; margin-top: 12px; }
+        .settings-card input {
+            width: 100%;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            padding: 10px 12px;
+            color: #e0e0e0;
+            font-size: 13px;
+            outline: none;
+        }
+        .settings-card input:focus { border-color: #ff9900; }
+        .settings-card button {
+            margin-top: 16px;
+            width: 100%;
+            background: #ff9900;
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            color: #1a1a2e;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .chat-ui {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+            min-height: 0;
+        }
     </style>
 </head>
 <body>
@@ -140,27 +196,95 @@
         <div class="logo">OA</div>
         <h1>OpsAgent AWS</h1>
         <div class="status" id="status">Connected</div>
+        <button class="settings-btn" id="settings-btn" title="Settings">⚙</button>
     </header>
-    <div class="chat-container" id="chat">
-        <div class="message system">OpsAgent AWS Operations Assistant — ask about EC2 instances, CloudWatch metrics, or request remediation actions.</div>
+
+    <div class="settings-panel" id="settings">
+        <div class="settings-card">
+            <h2>Connect to OpsAgent</h2>
+            <p>Enter your API endpoint and key. These are stored only in this browser's local storage — never committed to source.</p>
+            <label for="cfg-api-url">API URL</label>
+            <input type="text" id="cfg-api-url" placeholder="https://your-api-id.execute-api.region.amazonaws.com/prod/chat">
+            <label for="cfg-api-key">API Key</label>
+            <input type="password" id="cfg-api-key" placeholder="x-api-key value">
+            <label for="cfg-user-id">User ID</label>
+            <input type="text" id="cfg-user-id" placeholder="you@company.com">
+            <button id="settings-save">Save &amp; Connect</button>
+        </div>
     </div>
-    <div class="input-area">
-        <input type="text" id="input" placeholder="e.g. get CPU metrics for instance i-0abc123 in the last hour" autocomplete="off">
-        <button id="send" onclick="sendMessage()">Send</button>
+
+    <div class="chat-ui" id="chat-ui">
+        <div class="chat-container" id="chat">
+            <div class="message system">OpsAgent AWS Operations Assistant — ask about EC2 instances, CloudWatch metrics, or request remediation actions.</div>
+        </div>
+        <div class="input-area">
+            <input type="text" id="input" placeholder="e.g. get CPU metrics for instance i-0abc123 in the last hour" autocomplete="off">
+            <button id="send" onclick="sendMessage()">Send</button>
+        </div>
     </div>
 
     <script>
-        const API_URL = 'https://c6kpu67v33.execute-api.eu-west-2.amazonaws.com/prod/chat';
-        const API_KEY = 'b5TIlXKgiNas2ChP94nPu8kRrBIWJKWV5hu5OdnT';
-        const USER_ID = 'o.oluwafemi@limesoftsystem.com';
+        const CONFIG_KEYS = { apiUrl: 'opsagent_api_url', apiKey: 'opsagent_api_key', userId: 'opsagent_user_id' };
+
+        function getConfig() {
+            return {
+                apiUrl: localStorage.getItem(CONFIG_KEYS.apiUrl) || '',
+                apiKey: localStorage.getItem(CONFIG_KEYS.apiKey) || '',
+                userId: localStorage.getItem(CONFIG_KEYS.userId) || ''
+            };
+        }
+
+        function saveConfig(apiUrl, apiKey, userId) {
+            localStorage.setItem(CONFIG_KEYS.apiUrl, apiUrl);
+            localStorage.setItem(CONFIG_KEYS.apiKey, apiKey);
+            localStorage.setItem(CONFIG_KEYS.userId, userId);
+        }
 
         const chat = document.getElementById('chat');
         const input = document.getElementById('input');
         const sendBtn = document.getElementById('send');
+        const settingsPanel = document.getElementById('settings');
+        const chatUi = document.getElementById('chat-ui');
 
         input.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
 
+        function openSettings() {
+            const cfg = getConfig();
+            document.getElementById('cfg-api-url').value = cfg.apiUrl;
+            document.getElementById('cfg-api-key').value = cfg.apiKey;
+            document.getElementById('cfg-user-id').value = cfg.userId;
+            settingsPanel.style.display = 'flex';
+            chatUi.style.display = 'none';
+        }
+
+        function showChat() {
+            settingsPanel.style.display = 'none';
+            chatUi.style.display = 'flex';
+            input.focus();
+        }
+
+        document.getElementById('settings-btn').addEventListener('click', openSettings);
+
+        document.getElementById('settings-save').addEventListener('click', () => {
+            const apiUrl = document.getElementById('cfg-api-url').value.trim();
+            const apiKey = document.getElementById('cfg-api-key').value.trim();
+            const userId = document.getElementById('cfg-user-id').value.trim();
+            if (!apiUrl || !apiKey || !userId) return;
+            saveConfig(apiUrl, apiKey, userId);
+            showChat();
+        });
+
+        (function init() {
+            const cfg = getConfig();
+            if (!cfg.apiUrl || !cfg.apiKey || !cfg.userId) {
+                openSettings();
+            } else {
+                showChat();
+            }
+        })();
+
         async function sendMessage() {
+            const cfg = getConfig();
             const text = input.value.trim();
             if (!text) return;
 
@@ -175,10 +299,10 @@
             chat.scrollTop = chat.scrollHeight;
 
             try {
-                const res = await fetch(API_URL, {
+                const res = await fetch(cfg.apiUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
-                    body: JSON.stringify({ messageText: text, userId: USER_ID, channel: 'web' })
+                    headers: { 'Content-Type': 'application/json', 'x-api-key': cfg.apiKey },
+                    body: JSON.stringify({ messageText: text, userId: cfg.userId, channel: 'web' })
                 });
                 const data = await res.json();
                 typing.remove();
